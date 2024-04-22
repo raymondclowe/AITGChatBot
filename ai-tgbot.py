@@ -179,13 +179,18 @@ def get_reply(message, image_data_64, session_id):
 
     elif model.startswith("llama3"):
         if has_image:
-            session_data[session_id]["model_version"] = "gpt-4-turbo"
-            note = " (image included, gpt-4-turbo used)"
+    if "error" in raw_json:
+        return f"Error message: {raw_json['error']['message']}" + note, 0
         payload = {
             "model": model,
             "max_tokens": 3000,
             "messages": session_data[session_id]["CONVERSATION"],
         }
+        #####
+        print("\n\nPayload:")
+        print(payload
+              )
+        print("End of payload\n\n")
         raw_response = requests.post(
             GROQ_API_URL,
             headers={
@@ -202,6 +207,7 @@ def get_reply(message, image_data_64, session_id):
 
     # Handle the response
     raw_json = raw_response.json()
+    print(raw_json)
     if "error" in raw_json:
         return f"Error message: {raw_json['error']['message']}" + note, 0
 
@@ -210,17 +216,24 @@ def get_reply(message, image_data_64, session_id):
     if model.startswith("gpt") or model.startswith("openrouter"):
         tokens_used += raw_json["usage"]["total_tokens"]
         response_text = (
-            raw_json["choices"][0]["message"]["content"][0]["text"].strip()
+            raw_json["choices"][0]["message"]["content"].strip()
             if raw_json["choices"]
             else "API error occurred." + note
         )
-    else:  # Assuming "claud"
+    elif model.startswith("claud"):
         tokens_used += (
             raw_json["usage"]["input_tokens"] + raw_json["usage"]["output_tokens"]
         )
         response_text = (
             raw_json["content"][0]["text"].strip() + note
             if raw_json["content"]
+            else "API error occurred." + note
+        )
+    elif model.startswith("llama3"):
+        tokens_used += raw_json["usage"]["total_tokens"]
+        response_text = (
+            raw_json["choices"][0]["message"]["content"].strip()
+            if raw_json["choices"]
             else "API error occurred." + note
         )
 
@@ -349,6 +362,7 @@ def long_polling():
                 reply_text = f"Model: {session_data[chat_id]['model_version']}\n"
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
+                reply_text += f"Chatbot version: {version}\n"
                 send_message(chat_id, reply_text)
                 continue
 
