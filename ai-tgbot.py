@@ -50,9 +50,9 @@ def update_model_version(session_id, command):
     elif command.lower().startswith('/openrouter'):
         # look for a second word, that will be the actual model
         session_data[session_id]["model_version"] = "openrouter:" + command.split()[1]
-    elif command.lower() == "/llama3-8b":
+    elif command.lower() == "/llama38b":
         session_data[session_id]["model_version"] = "llama3-8b-8192"
-    elif command.lower() == "/llama3-70b":
+    elif command.lower() == "/llama370b":
         session_data[session_id]["model_version"] = "llama3-70b-8192"
 
 
@@ -358,8 +358,8 @@ def long_polling():
                 reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
                 reply_text += "/claud3opus - set the model to Claud 3 Opus\n"
                 reply_text += "/claud3haiku - set the model to Claud 3 Haiku\n"
-                reply_text += "/llama3-8b - set the model to Llama 3 8B\n"
-                reply_text += "/llama3-70b - set the model to Llama 3 70B\n"
+                reply_text += "/llama38b - set the model to Llama 3 8B\n"
+                reply_text += "/llama370b - set the model to Llama 3 70B\n"
                 reply_text += "/listopenroutermodels - list all openrouter models\n"
                 reply_text += "/openrouter <model id> - set the model to the model with the given id\n"
                 reply_text += "/status - get the chatbot status, current model, current max rounds, current conversation length"
@@ -534,8 +534,8 @@ long_polling()
 # gpt4 - Use OpenAI gpt4.0-turbo for answers (medium speed but more intelligent, handles all images)
 # claud3opus - Use Anthropic Claud 3 Opus 20240229 for answers (slowest but most intelligent)
 # claud3haiku - Use Anthropic Claud 3 Haiku for answers (cheap and fast, for better thank gpt3.5 quality)
-# llama3-8b - Use Llama3-8b via Groq for answers  (fast but rate limited)
-# llama3-70b - Use Llama3-70b via Groq for answers (fast but rate limited)
+# llama38b - Use Llama3-8b via Groq for answers  (fast but rate limited)
+# llama370b - Use Llama3-70b via Groq for answers (fast but rate limited)
 # openrouter - Use an OpenRouter.AI model by going /openrouter <model id>
 # listopenroutermodels - Get a list of all the OpenRouter.ai models
 # clear - Clear the context of the bot
