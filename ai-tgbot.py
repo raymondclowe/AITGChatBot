@@ -1,4 +1,8 @@
-version = "1.0.0"
+version = "1.2.0"
+
+# changelog
+# 1.1.0 - llama3 using groq
+# 1.2.0 - gpt4o support and set to default, increase max tokens to 4K for openai and 8K for Groq
 
 import requests
 import base64
@@ -11,12 +15,13 @@ API_KEY = os.environ.get('API_KEY')
 BOT_KEY = os.environ.get('BOT_KEY')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 
 # Set the URL for the API
 OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
 ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
 OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
-
+GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
 
 # list of the possible "model" values:
 # gpt-3.5-turbo
@@ -24,7 +29,8 @@ OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 # claude-3-opus-20240229
 # claude-3-haiku-20240307
 # openrouter:<model name>
-
+# llama3-8b-8192
+# llama3-70b-8192 (on groq)
 
 # set starting values
 session_data = {}
@@ -38,17 +44,23 @@ def update_model_version(session_id, command):
         session_data[session_id]["model_version"] = "gpt-3.5-turbo"
     elif command.lower() == "/gpt4":
         session_data[session_id]["model_version"] = "gpt-4-turbo"
+    elif command.lower() == "/gpt4o":
+        session_data[session_id]["model_version"] = "gpt-4o"
     elif command.lower() == "/claud3opus":
         session_data[session_id]["model_version"] = "claude-3-opus-20240229"
     elif command.lower() == "/claud3haiku":
         session_data[session_id]["model_version"] = "claude-3-haiku-20240307"
     elif command.lower().startswith('/openrouter'):
         # look for a second word, that will be the actual model
-        session_data[session_id]["model_version"] = "openrouter:" + command.split()[1] 
+        session_data[session_id]["model_version"] = "openrouter:" + command.split()[1]
+    elif command.lower() == "/llama38b":
+        session_data[session_id]["model_version"] = "llama3-8b-8192"
+    elif command.lower() == "/llama370b":
+        session_data[session_id]["model_version"] = "llama3-70b-8192"
+
 
 def clear_context(chat_id):
     session_data[chat_id]['CONVERSATION'] = []
-
 
 
 def get_reply(message, image_data_64, session_id):
@@ -56,14 +68,14 @@ def get_reply(message, image_data_64, session_id):
         session_data[session_id] = {
             "CONVERSATION": [],
             "tokens_used": 0,
-            "model_version": "gpt-4-turbo",
+            "model_version": "gpt-4o",
             "max_rounds": DEFAULT_MAX_ROUNDS
         }
     has_image = False
     # check the length of the existing conversation, if it is too long (with messages more than double the max rounds, then trim off until it is within the limit of rounds. one round is one user and one assistant text.
     max_messages = session_data[session_id]["max_rounds"] * 2
     if len(session_data[session_id]["CONVERSATION"]) > max_messages:
-        session_data[session_id]["CONVERSATION"] = session_data[session_id]["CONVERSATION"][-max_messages:]    
+        session_data[session_id]["CONVERSATION"] = session_data[session_id]["CONVERSATION"][-max_messages:]
 
     # Add the new user message to the conversation
     new_user_message = [
@@ -92,30 +104,41 @@ def get_reply(message, image_data_64, session_id):
                     break
 
     # print (f"has_image: {has_image}")
-                
+
     model = session_data[session_id]["model_version"]
 
-    # if an openrouter model then strip of the string "openrouter:" from the beginning
-    if model.startswith("openrouter:"):
-        model = model[11:]
 
-    payload = {
-        "model": model,
-        "max_tokens": 3000,
-        "messages": session_data[session_id]["CONVERSATION"],
-    }
 
-    # Select API based on model_version
-    if session_data[session_id]["model_version"].startswith("gpt"):
-        raw_response = requests.post(
-            OPENAI_API_URL,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {API_KEY}",
-            },
-            json=payload,
-        )
-    elif session_data[session_id]["model_version"].startswith("claud"):  # Assuming "claud"
+    if model.startswith("gpt") or model.startswith("openrouter"):
+        # if an openrouter model then strip of the string "openrouter:" from the beginning
+        if model.startswith("openrouter:"):
+            model = model[11:]
+        payload = {
+            "model": model,
+            "max_tokens": 4000,
+            "messages": session_data[session_id]["CONVERSATION"],
+        }
+
+        if model.startswith("gpt"):
+            raw_response = requests.post(
+                OPENAI_API_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {API_KEY}",
+                },
+                json=payload,
+            )
+        else:
+            raw_response = requests.post(
+                OPENROUTER_API_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                },
+                json=payload,
+            )
+
+    elif model.startswith("claud"):
         anthropic_payload = {
             "model": model,
             "max_tokens": 3000,
@@ -157,38 +180,73 @@ def get_reply(message, image_data_64, session_id):
             },
             json=anthropic_payload,
         )
-    elif session_data[session_id]["model_version"].startswith("openrouter"):
-            raw_response = requests.post(
-            OPENROUTER_API_URL,
+
+    elif model.startswith("llama3"):
+        if has_image:
+            session_data[session_id]["model_version"] = model
+            note = " (image included)"
+        else:
+            note = ""
+            
+        groq_payload = {
+            "model": model,
+            "max_tokens": 8000,
+            "messages": [],
+        }
+        groq_messages = []
+        for message in session_data[session_id]["CONVERSATION"]:
+            groq_message = {}
+            groq_message["role"] = message["role"]
+            groq_message["content"] = ""
+            for content in message["content"]:
+                if content["type"] == "text":
+                    groq_message["content"] = content["text"]
+                    break
+            groq_messages.append(groq_message)
+            
+        groq_payload["messages"] = groq_messages
+        
+        raw_response = requests.post(
+            GROQ_API_URL,
             headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Authorization": "Bearer " + GROQ_API_KEY,                
+                "content-type": "application/json",
             },
-            json=payload,
+            json=groq_payload
         )
 
     # Handle the response
     raw_json = raw_response.json()
+    
+    print(json.dumps(raw_json, indent=4 ))
+
     if "error" in raw_json:
-        return f"Error message: {raw_json['error']['message']}", 0
+        return f"Error message: {raw_json['error']['message']}" + note, 0
 
     # Update tokens used and process the response based on the model used
     tokens_used = session_data[session_id]["tokens_used"]
-    if session_data[session_id]["model_version"].startswith("gpt") or session_data[session_id]["model_version"].startswith("openrouter"):
+    if model.startswith("gpt") or model.startswith("openrouter"):
         tokens_used += raw_json["usage"]["total_tokens"]
         response_text = (
             raw_json["choices"][0]["message"]["content"].strip()
             if raw_json["choices"]
-            else "API error occurred."
+            else "API error occurred." + note
         )
-    else:  # Assuming "claud"
+    elif model.startswith("claud"):
         tokens_used += (
             raw_json["usage"]["input_tokens"] + raw_json["usage"]["output_tokens"]
         )
         response_text = (
-            raw_json["content"][0]["text"].strip()
+            raw_json["content"][0]["text"].strip() + note
             if raw_json["content"]
-            else "API error occurred."
+            else "API error occurred." + note
+        )
+    elif model.startswith("llama3"):
+        tokens_used += raw_json["usage"]["total_tokens"]
+        response_text = (
+            raw_json["choices"][0]["message"]["content"].strip()
+            if raw_json["choices"]
+            else "API error occurred." + note
         )
 
     # Update the conversation with the assistant response
@@ -220,11 +278,11 @@ def list_openrouter_models_as_message():
     response = requests.get(f"https://openrouter.ai/api/v1/models")
     openRouterModelList = response.json()['data']
     model_list = "Model ID : Model Name\n\n"
-    for model in openRouterModelList: # include only id and name fields
+    for model in openRouterModelList:  # include only id and name fields
         model_list += f"{model['id']} : {model['name']}\n"
-        
     model_list += "\n\nOr choose from the best ranked at https://openrouter.ai/rankings"
     return model_list
+
 
 # get list from https://openrouter.ai/api/v1/models
 def list_openrouter_models_as_list():
@@ -234,7 +292,6 @@ def list_openrouter_models_as_list():
     for model in openRouterModelList:
         model_list.append(model['id'])
     return model_list
-
 
 
 # Long polling loop
@@ -247,14 +304,10 @@ def long_polling():
 
             # presume the response is json and pretty print it with nice colors and formatting
             # print(response.json(), indent=4, sort_dicts=False)
-            
 
             # If there is no response then continue the loop
             if not response.json()['result']:
                 continue
-
-
-
 
 
         except Exception as e:
@@ -272,34 +325,31 @@ def long_polling():
             # if the message_text length is near the limit then maybe this is a truncated message
             # so we need to get the rest of the message
             if len(message_text) > 3000:
-                # fast loop to look for any additional messages, down side of this is it adds at least one extra second            
+                # fast loop to look for any additional messages, down side of this is it adds at least one second
                 while True:
-                    # check with a timeout of 1 seconds to see if there is more data
                     additional_response = requests.get(f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=1&offset={offset}")
                     if not additional_response.json()['result']:
                         break
                     else:
                         additional_latest_message = additional_response.json()['result'][-1]
-                        message_text += additional_latest_message['message'].get('text', '')
+                        message_text += additional_latest_message['message']['text']
                         offset = additional_latest_message['update_id'] + 1
                         # after having got this additional text we loop because there might be more
 
 
             # check in the session data if there is a key with this chat_id, if not then initialize an empty one
-            if chat_id not in session_data: # doing it now because we may have to accept setting model version
-                session_data[chat_id] = {'model_version': "gpt-4-turbo",
+            if chat_id not in session_data:  # doing it now because we may have to accept setting model version
+                session_data[chat_id] = {'model_version': "gpt-4o",
                                         'CONVERSATION': [],
                                         'tokens_used': 0,
                                         "max_rounds": DEFAULT_MAX_ROUNDS
                                         }
 
-
-
         except Exception as e:
             print(f"Error reading last message on line {e.__traceback__.tb_lineno}: {e}")
             continue
 
-        try:            
+        try:
 
             # implement a /help command that outputs brief explanation of commands
             if message_text.startswith('/help'):
@@ -309,20 +359,23 @@ def long_polling():
                 reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
                 reply_text += "/gpt3 - set the model to gpt3\n"
                 reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
+                reply_text += "/gpt4o - set the model to gpt-4o\n"
                 reply_text += "/claud3opus - set the model to Claud 3 Opus\n"
                 reply_text += "/claud3haiku - set the model to Claud 3 Haiku\n"
+                reply_text += "/llama38b - set the model to Llama 3 8B\n"
+                reply_text += "/llama370b - set the model to Llama 3 70B\n"
                 reply_text += "/listopenroutermodels - list all openrouter models\n"
                 reply_text += "/openrouter <model id> - set the model to the model with the given id\n"
                 reply_text += "/status - get the chatbot status, current model, current max rounds, current conversation length"
 
-
                 send_message(chat_id, reply_text)
-                continue  # Skip the rest of the processing loop                
+                continue  # Skip the rest of the processing loop
 
             if message_text.startswith('/status'):
                 reply_text = f"Model: {session_data[chat_id]['model_version']}\n"
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
+                reply_text += f"Chatbot version: {version}\n"
                 send_message(chat_id, reply_text)
                 continue
 
@@ -366,6 +419,7 @@ def long_polling():
                 or message_text.startswith("/gpt4")
                 or message_text.startswith("/claud3")
                 or message_text.startswith("/openrouter")
+                or  message_text.startswith("/llama3")
             ):
                 if message_text.startswith("/openrouter"):
                     # validate that there is a second word, being the model name
@@ -482,8 +536,11 @@ long_polling()
 
 # gpt3 - Use OpenAI gpt3.5-turbo for answers (fastest but dumb)
 # gpt4 - Use OpenAI gpt4.0-turbo for answers (medium speed but more intelligent, handles all images)
+# gpt4o - Use OpenAI gpt4o for answers (fast speed almost as intelligent, handles all images)
 # claud3opus - Use Anthropic Claud 3 Opus 20240229 for answers (slowest but most intelligent)
 # claud3haiku - Use Anthropic Claud 3 Haiku for answers (cheap and fast, for better thank gpt3.5 quality)
+# llama38b - Use Llama3-8b via Groq for answers  (fast but rate limited)
+# llama370b - Use Llama3-70b via Groq for answers (fast but rate limited)
 # openrouter - Use an OpenRouter.AI model by going /openrouter <model id>
 # listopenroutermodels - Get a list of all the OpenRouter.ai models
 # clear - Clear the context of the bot
