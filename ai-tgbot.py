@@ -104,11 +104,12 @@ def get_reply(message, image_data_64, session_id):
 
     model = session_data[session_id]["model_version"]
 
-    # if an openrouter model then strip of the string "openrouter:" from the beginning
-    if model.startswith("openrouter:"):
-        model = model[11:]
+
 
     if model.startswith("gpt") or model.startswith("openrouter"):
+        # if an openrouter model then strip of the string "openrouter:" from the beginning
+        if model.startswith("openrouter:"):
+            model = model[11:]
         payload = {
             "model": model,
             "max_tokens": 3000,
@@ -179,35 +180,43 @@ def get_reply(message, image_data_64, session_id):
 
     elif model.startswith("llama3"):
         if has_image:
-    if "error" in raw_json:
-        return f"Error message: {raw_json['error']['message']}" + note, 0
-        payload = {
-            "model": model,
-            "max_tokens": 3000,
-            "messages": session_data[session_id]["CONVERSATION"],
-        }
-        #####
-        print("\n\nPayload:")
-        print(payload
-              )
-        print("End of payload\n\n")
-        raw_response = requests.post(
-            GROQ_API_URL,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-            },
-            json=payload,
-        )
-        if has_image:
             session_data[session_id]["model_version"] = model
             note = " (image included, gpt-4-turbo used)"
         else:
             note = ""
+            
+        groq_payload = {
+            "model": model,
+            "max_tokens": 3000,
+            "messages": [],
+        }
+        groq_messages = []
+        for message in session_data[session_id]["CONVERSATION"]:
+            groq_message = {}
+            groq_message["role"] = message["role"]
+            groq_message["content"] = ""
+            for content in message["content"]:
+                if content["type"] == "text":
+                    groq_message["content"] = content["text"]
+                    break
+            groq_messages.append(groq_message)
+            
+        groq_payload["messages"] = groq_messages
+        
+        raw_response = requests.post(
+            GROQ_API_URL,
+            headers={
+                "Authorization": "Bearer " + GROQ_API_KEY,                
+                "content-type": "application/json",
+            },
+            json=groq_payload
+        )
 
     # Handle the response
     raw_json = raw_response.json()
-    print(raw_json)
+    
+    print(json.dumps(raw_json, indent=4 ))
+
     if "error" in raw_json:
         return f"Error message: {raw_json['error']['message']}" + note, 0
 
