@@ -1,7 +1,8 @@
-version = "1.1.0"
+version = "1.2.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
+# 1.2.0 - gpt4o support and set to default, increase max tokens to 4K for openai and 8K for Groq
 
 import requests
 import base64
