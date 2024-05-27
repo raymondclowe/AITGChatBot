@@ -43,6 +43,8 @@ def update_model_version(session_id, command):
         session_data[session_id]["model_version"] = "gpt-3.5-turbo"
     elif command.lower() == "/gpt4":
         session_data[session_id]["model_version"] = "gpt-4-turbo"
+    elif command.lower() == "/gpt4o":
+        session_data[session_id]["model_version"] = "gpt-4o"
     elif command.lower() == "/claud3opus":
         session_data[session_id]["model_version"] = "claude-3-opus-20240229"
     elif command.lower() == "/claud3haiku":
@@ -65,7 +67,7 @@ def get_reply(message, image_data_64, session_id):
         session_data[session_id] = {
             "CONVERSATION": [],
             "tokens_used": 0,
-            "model_version": "gpt-4-turbo",
+            "model_version": "gpt-4o",
             "max_rounds": DEFAULT_MAX_ROUNDS
         }
     has_image = False
@@ -112,7 +114,7 @@ def get_reply(message, image_data_64, session_id):
             model = model[11:]
         payload = {
             "model": model,
-            "max_tokens": 3000,
+            "max_tokens": 4000,
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
@@ -181,13 +183,13 @@ def get_reply(message, image_data_64, session_id):
     elif model.startswith("llama3"):
         if has_image:
             session_data[session_id]["model_version"] = model
-            note = " (image included, gpt-4-turbo used)"
+            note = " (image included)"
         else:
             note = ""
             
         groq_payload = {
             "model": model,
-            "max_tokens": 3000,
+            "max_tokens": 8000,
             "messages": [],
         }
         groq_messages = []
@@ -336,7 +338,7 @@ def long_polling():
 
             # check in the session data if there is a key with this chat_id, if not then initialize an empty one
             if chat_id not in session_data:  # doing it now because we may have to accept setting model version
-                session_data[chat_id] = {'model_version': "gpt-4-turbo",
+                session_data[chat_id] = {'model_version': "gpt-4o",
                                         'CONVERSATION': [],
                                         'tokens_used': 0,
                                         "max_rounds": DEFAULT_MAX_ROUNDS
@@ -356,6 +358,7 @@ def long_polling():
                 reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
                 reply_text += "/gpt3 - set the model to gpt3\n"
                 reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
+                reply_text += "/gpt4o - set the model to gpt-4o\n"
                 reply_text += "/claud3opus - set the model to Claud 3 Opus\n"
                 reply_text += "/claud3haiku - set the model to Claud 3 Haiku\n"
                 reply_text += "/llama38b - set the model to Llama 3 8B\n"
@@ -532,6 +535,7 @@ long_polling()
 
 # gpt3 - Use OpenAI gpt3.5-turbo for answers (fastest but dumb)
 # gpt4 - Use OpenAI gpt4.0-turbo for answers (medium speed but more intelligent, handles all images)
+# gpt4o - Use OpenAI gpt4o for answers (fast speed almost as intelligent, handles all images)
 # claud3opus - Use Anthropic Claud 3 Opus 20240229 for answers (slowest but most intelligent)
 # claud3haiku - Use Anthropic Claud 3 Haiku for answers (cheap and fast, for better thank gpt3.5 quality)
 # llama38b - Use Llama3-8b via Groq for answers  (fast but rate limited)
