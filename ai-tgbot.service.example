@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Telegrambot
+After=network.target
+
+[Service]
+User=chatbotuser
+WorkingDirectory=/opt/AITGChatBot
+ExecStart=/usr/bin/python3 /opt/AITGChatBot/ai-tgbot.py
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+Environment="API_KEY=sk-xxxx" "BOT_KEY=999:xxx" "ANTHROPIC_API_KEY=sk-ant-api03-xxx-xxx-xxx" "OPENROUTER_API_KEY=sk-or-v1-xxx" "GROQ_API_KEY=xxx"
+
+[Install]
+WantedBy=multi-user.target
