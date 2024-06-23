@@ -445,11 +445,21 @@ def long_polling():
                         continue
                     # get the model name
                     model_name = message_text.split()[1]
-                    # validate this model name is ok by checking against the list of models
-                    if model_name not in list_openrouter_models_as_list():
+                    # get the list of matching models
+                    matching_models = get_matching_models(model_name)
+                    if len(matching_models) == 0:
                         reply_text = f"Model name {model_name} not found in list of models"
                         send_message(chat_id, reply_text)
-                        continue                    
+                        continue
+                    elif len(matching_models) == 1:
+                        session_data[chat_id]["model_version"] = "openrouter:" + matching_models[0]
+                        reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
+                        send_message(chat_id, reply_text)
+                        continue
+                    else:
+                        reply_text = f"Multiple models match '{model_name}': " + ', '.join(matching_models)
+                        send_message(chat_id, reply_text)
+                        continue
                 update_model_version(chat_id, message_text)
                 reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
                 send_message(chat_id, reply_text)
