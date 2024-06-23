@@ -64,6 +64,7 @@ def update_model_version(session_id, command):
         session_data[session_id]["model_version"] = "llama3-8b-8192"
     elif command.lower() == "/llama370b":
         session_data[session_id]["model_version"] = "llama3-70b-8192"
+    print(f"Debug: Session data after model update: {session_data[session_id]}")
 
 
 def clear_context(chat_id):
