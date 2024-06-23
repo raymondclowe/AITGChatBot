@@ -1,4 +1,4 @@
-version = "1.2.0dev"
+version = "1.2.0dev2"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -229,9 +229,11 @@ def get_reply(message, image_data_64, session_id):
     # Handle the response
     raw_json = raw_response.json()
     
+    print("Raw JSON response from AI backend:")
     print(json.dumps(raw_json, indent=4 ))
 
     if "error" in raw_json:
+        print("Error detected in AI backend response.")
         return f"Error message: {raw_json['error']['message']}" + note, 0
 
     # Update tokens used and process the response based on the model used
@@ -243,6 +245,7 @@ def get_reply(message, image_data_64, session_id):
             if raw_json["choices"]
             else "API error occurred." + note
         )
+        print(f"Response text for gpt or openrouter model: {response_text}")
     elif model.startswith("claud"):
         tokens_used += (
             raw_json["usage"]["input_tokens"] + raw_json["usage"]["output_tokens"]
@@ -252,6 +255,7 @@ def get_reply(message, image_data_64, session_id):
             if raw_json["content"]
             else "API error occurred." + note
         )
+        print(f"Response text for claud model: {response_text}")
     elif model.startswith("llama3"):
         tokens_used += raw_json["usage"]["total_tokens"]
         response_text = (
@@ -259,6 +263,7 @@ def get_reply(message, image_data_64, session_id):
             if raw_json["choices"]
             else "API error occurred." + note
         )
+        print(f"Response text for llama3 model: {response_text}")
 
     # Update the conversation with the assistant response
     assistant_response = [
