@@ -250,6 +250,17 @@ def get_reply(message, image_data_64, session_id):
         tokens_used += (
             raw_json["usage"]["prompt_tokens"] + raw_json["usage"]["completion_tokens"]
         )
+        print("Debug: 'choices' field in raw_json:")
+        print(raw_json.get("choices"))
+        if raw_json.get("choices"):
+            print("Debug: First item in 'choices':")
+            print(raw_json["choices"][0])
+            if raw_json["choices"][0].get("message"):
+                print("Debug: 'message' field in first item of 'choices':")
+                print(raw_json["choices"][0]["message"])
+                if raw_json["choices"][0]["message"].get("content"):
+                    print("Debug: 'content' field in 'message':")
+                    print(raw_json["choices"][0]["message"]["content"])
         if "choices" in raw_json and "message" in raw_json["choices"][0] and "content" in raw_json["choices"][0]["message"]:
             response_text = (
                 raw_json["choices"][0]["message"]["content"].strip() + note
