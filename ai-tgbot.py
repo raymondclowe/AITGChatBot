@@ -58,8 +58,7 @@ def update_model_version(session_id, command):
             session_data[session_id]["model_version"] = matching_models[0]
             session_data[session_id]["provider"] = "openrouter"
         elif len(matching_models) > 1:
-            session_data[session_id]["model_version"] = ', '.join(matching_models)
-            session_data[session_id]["provider"] = "openrouter"
+            print("More than one matching model")
     elif command.lower() == "/llama38b":
         session_data[session_id]["model_version"] = "llama3-8b-8192"
     elif command.lower() == "/llama370b":
@@ -134,11 +133,11 @@ def get_reply(message, image_data_64, session_id):
             },
             json=payload,
         )
-    elif session_data[session_id].get("provider") == "openrouter":
+    elif model.startswith("openrouter"):
         # if an openrouter model then strip of the string "openrouter:" from the beginning
-        model = model[11:]
+        # model = model[11:]
         payload = {
-            "model": model,
+            "model": model[11:],
             "max_tokens": 4000,
             "messages": session_data[session_id]["CONVERSATION"],
         }
