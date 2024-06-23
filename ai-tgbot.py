@@ -1,4 +1,4 @@
-version = "1.2.0dev2"
+version = "1.3.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
