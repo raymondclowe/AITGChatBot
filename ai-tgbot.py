@@ -339,9 +339,14 @@ def long_polling():
 
             # Get the latest message and update the offset
             latest_message = response.json()['result'][-1]
-            message_text = latest_message['message'].get('text', '')  # Use get() with a default value of ''
-            chat_id = latest_message['message']['chat']['id']
             offset = latest_message['update_id'] + 1
+
+            # Check if 'message' is in the latest_message
+            if 'message' in latest_message:
+                message_text = latest_message['message'].get('text', '')  # Use get() with a default value of ''
+                chat_id = latest_message['message']['chat']['id']
+            else:
+                continue
 
             # if the message_text length is near the limit then maybe this is a truncated message
             # so we need to get the rest of the message
