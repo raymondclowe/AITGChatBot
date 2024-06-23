@@ -1,4 +1,4 @@
-version = "1.2.0"
+version = "1.3.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -52,11 +52,18 @@ def update_model_version(session_id, command):
         session_data[session_id]["model_version"] = "claude-3-haiku-20240307"
     elif command.lower().startswith('/openrouter'):
         # look for a second word, that will be the actual model
-        session_data[session_id]["model_version"] = "openrouter:" + command.split()[1]
+        model_substring = command.split()[1]
+        matching_models = get_matching_models(model_substring)
+        if len(matching_models) == 1:
+            session_data[session_id]["model_version"] = matching_models[0]
+            session_data[session_id]["provider"] = "openrouter"
+        elif len(matching_models) > 1:
+            print("More than one matching model")
     elif command.lower() == "/llama38b":
         session_data[session_id]["model_version"] = "llama3-8b-8192"
     elif command.lower() == "/llama370b":
         session_data[session_id]["model_version"] = "llama3-70b-8192"
+    print(f"Debug: Session data after model update: {session_data[session_id]}")
 
 
 def clear_context(chat_id):
@@ -64,6 +71,8 @@ def clear_context(chat_id):
 
 
 def get_reply(message, image_data_64, session_id):
+    note = ""
+    response_text = ""
     if not session_data[session_id]:
         session_data[session_id] = {
             "CONVERSATION": [],
@@ -109,34 +118,38 @@ def get_reply(message, image_data_64, session_id):
 
 
 
-    if model.startswith("gpt") or model.startswith("openrouter"):
-        # if an openrouter model then strip of the string "openrouter:" from the beginning
-        if model.startswith("openrouter:"):
-            model = model[11:]
+    if model.startswith("gpt"):
         payload = {
             "model": model,
             "max_tokens": 4000,
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
-        if model.startswith("gpt"):
-            raw_response = requests.post(
-                OPENAI_API_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {API_KEY}",
-                },
-                json=payload,
-            )
-        else:
-            raw_response = requests.post(
-                OPENROUTER_API_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                },
-                json=payload,
-            )
+        raw_response = requests.post(
+            OPENAI_API_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {API_KEY}",
+            },
+            json=payload,
+        )
+    elif model.startswith("openrouter"):
+        # if an openrouter model then strip of the string "openrouter:" from the beginning
+        # model = model[11:]
+        payload = {
+            "model": model[11:],
+            "max_tokens": 4000,
+            "messages": session_data[session_id]["CONVERSATION"],
+        }
+
+        raw_response = requests.post(
+            OPENROUTER_API_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            },
+            json=payload,
+        )
 
     elif model.startswith("claud"):
         anthropic_payload = {
@@ -218,9 +231,11 @@ def get_reply(message, image_data_64, session_id):
     # Handle the response
     raw_json = raw_response.json()
     
+    print("Raw JSON response from AI backend:")
     print(json.dumps(raw_json, indent=4 ))
 
     if "error" in raw_json:
+        print("Error detected in AI backend response.")
         return f"Error message: {raw_json['error']['message']}" + note, 0
 
     # Update tokens used and process the response based on the model used
@@ -232,15 +247,29 @@ def get_reply(message, image_data_64, session_id):
             if raw_json["choices"]
             else "API error occurred." + note
         )
+        print(f"Response text for gpt or openrouter model: {response_text}")
     elif model.startswith("claud"):
         tokens_used += (
-            raw_json["usage"]["input_tokens"] + raw_json["usage"]["output_tokens"]
+            raw_json["usage"]["prompt_tokens"] + raw_json["usage"]["completion_tokens"]
         )
-        response_text = (
-            raw_json["content"][0]["text"].strip() + note
-            if raw_json["content"]
-            else "API error occurred." + note
-        )
+        print("Debug: 'choices' field in raw_json:")
+        print(raw_json.get("choices"))
+        if raw_json.get("choices"):
+            print("Debug: First item in 'choices':")
+            print(raw_json["choices"][0])
+            if raw_json["choices"][0].get("message"):
+                print("Debug: 'message' field in first item of 'choices':")
+                print(raw_json["choices"][0]["message"])
+                if raw_json["choices"][0]["message"].get("content"):
+                    print("Debug: 'content' field in 'message':")
+                    print(raw_json["choices"][0]["message"]["content"])
+        if "choices" in raw_json and "message" in raw_json["choices"][0] and "content" in raw_json["choices"][0]["message"]:
+            response_text = (
+                raw_json["choices"][0]["message"]["content"].strip() + note
+            )
+        else:
+            response_text = "API error occurred." + note
+        print(f"Response text for claud model: {response_text}")
     elif model.startswith("llama3"):
         tokens_used += raw_json["usage"]["total_tokens"]
         response_text = (
@@ -248,6 +277,7 @@ def get_reply(message, image_data_64, session_id):
             if raw_json["choices"]
             else "API error occurred." + note
         )
+        print(f"Response text for llama3 model: {response_text}")
 
     # Update the conversation with the assistant response
     assistant_response = [
@@ -293,6 +323,11 @@ def list_openrouter_models_as_list():
         model_list.append(model['id'])
     return model_list
 
+def get_matching_models(substring):
+    all_models = list_openrouter_models_as_list()
+    matching_models = [model for model in all_models if substring in model]
+    return matching_models
+
 
 # Long polling loop
 def long_polling():
@@ -318,9 +353,14 @@ def long_polling():
 
             # Get the latest message and update the offset
             latest_message = response.json()['result'][-1]
-            message_text = latest_message['message'].get('text', '')  # Use get() with a default value of ''
-            chat_id = latest_message['message']['chat']['id']
             offset = latest_message['update_id'] + 1
+
+            # Check if 'message' is in the latest_message
+            if 'message' in latest_message:
+                message_text = latest_message['message'].get('text', '')  # Use get() with a default value of ''
+                chat_id = latest_message['message']['chat']['id']
+            else:
+                continue
 
             # if the message_text length is near the limit then maybe this is a truncated message
             # so we need to get the rest of the message
@@ -373,6 +413,7 @@ def long_polling():
 
             if message_text.startswith('/status'):
                 reply_text = f"Model: {session_data[chat_id]['model_version']}\n"
+                reply_text += f"Provider: {session_data[chat_id].get('provider', 'Not set')}\n"
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
                 reply_text += f"Chatbot version: {version}\n"
@@ -429,11 +470,21 @@ def long_polling():
                         continue
                     # get the model name
                     model_name = message_text.split()[1]
-                    # validate this model name is ok by checking against the list of models
-                    if model_name not in list_openrouter_models_as_list():
+                    # get the list of matching models
+                    matching_models = get_matching_models(model_name)
+                    if len(matching_models) == 0:
                         reply_text = f"Model name {model_name} not found in list of models"
                         send_message(chat_id, reply_text)
-                        continue                    
+                        continue
+                    elif len(matching_models) == 1:
+                        session_data[chat_id]["model_version"] = "openrouter:" + matching_models[0]
+                        reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
+                        send_message(chat_id, reply_text)
+                        continue
+                    else:
+                        reply_text = f"Multiple models match '{model_name}': " + ', '.join(matching_models)
+                        send_message(chat_id, reply_text)
+                        continue
                 update_model_version(chat_id, message_text)
                 reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
                 send_message(chat_id, reply_text)
