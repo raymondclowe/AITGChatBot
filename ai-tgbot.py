@@ -109,34 +109,38 @@ def get_reply(message, image_data_64, session_id):
 
 
 
-    if model.startswith("gpt") or model.startswith("openrouter"):
-        # if an openrouter model then strip of the string "openrouter:" from the beginning
-        if model.startswith("openrouter:"):
-            model = model[11:]
+    if model.startswith("gpt"):
         payload = {
             "model": model,
             "max_tokens": 4000,
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
-        if model.startswith("gpt"):
-            raw_response = requests.post(
-                OPENAI_API_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {API_KEY}",
-                },
-                json=payload,
-            )
-        else:
-            raw_response = requests.post(
-                OPENROUTER_API_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                },
-                json=payload,
-            )
+        raw_response = requests.post(
+            OPENAI_API_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {API_KEY}",
+            },
+            json=payload,
+        )
+    elif model.startswith("openrouter"):
+        # if an openrouter model then strip of the string "openrouter:" from the beginning
+        model = model[11:]
+        payload = {
+            "model": model,
+            "max_tokens": 4000,
+            "messages": session_data[session_id]["CONVERSATION"],
+        }
+
+        raw_response = requests.post(
+            OPENROUTER_API_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            },
+            json=payload,
+        )
 
     elif model.startswith("claud"):
         anthropic_payload = {
