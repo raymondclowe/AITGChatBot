@@ -64,6 +64,8 @@ def clear_context(chat_id):
 
 
 def get_reply(message, image_data_64, session_id):
+    note = ""
+    response_text = ""
     if not session_data[session_id]:
         session_data[session_id] = {
             "CONVERSATION": [],
