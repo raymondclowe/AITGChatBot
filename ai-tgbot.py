@@ -133,7 +133,7 @@ def get_reply(message, image_data_64, session_id):
             },
             json=payload,
         )
-    elif session_data[session_id]["provider"] == "openrouter":
+    elif session_data[session_id].get("provider") == "openrouter":
         # if an openrouter model then strip of the string "openrouter:" from the beginning
         model = model[11:]
         payload = {
