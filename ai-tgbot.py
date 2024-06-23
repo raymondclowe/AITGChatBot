@@ -52,7 +52,12 @@ def update_model_version(session_id, command):
         session_data[session_id]["model_version"] = "claude-3-haiku-20240307"
     elif command.lower().startswith('/openrouter'):
         # look for a second word, that will be the actual model
-        session_data[session_id]["model_version"] = "openrouter:" + command.split()[1]
+        model_substring = command.split()[1]
+        matching_models = get_matching_models(model_substring)
+        if len(matching_models) == 1:
+            session_data[session_id]["model_version"] = "openrouter:" + matching_models[0]
+        elif len(matching_models) > 1:
+            session_data[session_id]["model_version"] = "openrouter:" + ', '.join(matching_models)
     elif command.lower() == "/llama38b":
         session_data[session_id]["model_version"] = "llama3-8b-8192"
     elif command.lower() == "/llama370b":
@@ -298,6 +303,11 @@ def list_openrouter_models_as_list():
     for model in openRouterModelList:
         model_list.append(model['id'])
     return model_list
+
+def get_matching_models(substring):
+    all_models = list_openrouter_models_as_list()
+    matching_models = [model for model in all_models if substring in model]
+    return matching_models
 
 
 # Long polling loop
