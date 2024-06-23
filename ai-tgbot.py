@@ -413,6 +413,7 @@ def long_polling():
 
             if message_text.startswith('/status'):
                 reply_text = f"Model: {session_data[chat_id]['model_version']}\n"
+                reply_text += f"Provider: {session_data[chat_id].get('provider', 'Not set')}\n"
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
                 reply_text += f"Chatbot version: {version}\n"
