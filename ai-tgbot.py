@@ -250,11 +250,12 @@ def get_reply(message, image_data_64, session_id):
         tokens_used += (
             raw_json["usage"]["prompt_tokens"] + raw_json["usage"]["completion_tokens"]
         )
-        response_text = (
-            raw_json["choices"][0]["message"]["content"].strip() + note
-            if raw_json["choices"]
-            else "API error occurred." + note
-        )
+        if "choices" in raw_json and "message" in raw_json["choices"][0] and "content" in raw_json["choices"][0]["message"]:
+            response_text = (
+                raw_json["choices"][0]["message"]["content"].strip() + note
+            )
+        else:
+            response_text = "API error occurred." + note
         print(f"Response text for claud model: {response_text}")
     elif model.startswith("llama3"):
         tokens_used += raw_json["usage"]["total_tokens"]
