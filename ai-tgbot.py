@@ -248,11 +248,11 @@ def get_reply(message, image_data_64, session_id):
         print(f"Response text for gpt or openrouter model: {response_text}")
     elif model.startswith("claud"):
         tokens_used += (
-            raw_json["usage"]["input_tokens"] + raw_json["usage"]["output_tokens"]
+            raw_json["usage"]["prompt_tokens"] + raw_json["usage"]["completion_tokens"]
         )
         response_text = (
-            raw_json["content"][0]["text"].strip() + note
-            if raw_json["content"]
+            raw_json["choices"][0]["message"]["content"].strip() + note
+            if raw_json["choices"]
             else "API error occurred." + note
         )
         print(f"Response text for claud model: {response_text}")
