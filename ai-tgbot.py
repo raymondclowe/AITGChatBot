@@ -55,9 +55,11 @@ def update_model_version(session_id, command):
         model_substring = command.split()[1]
         matching_models = get_matching_models(model_substring)
         if len(matching_models) == 1:
-            session_data[session_id]["model_version"] = "openrouter:" + matching_models[0]
+            session_data[session_id]["model_version"] = matching_models[0]
+            session_data[session_id]["provider"] = "openrouter"
         elif len(matching_models) > 1:
-            session_data[session_id]["model_version"] = "openrouter:" + ', '.join(matching_models)
+            session_data[session_id]["model_version"] = ', '.join(matching_models)
+            session_data[session_id]["provider"] = "openrouter"
     elif command.lower() == "/llama38b":
         session_data[session_id]["model_version"] = "llama3-8b-8192"
     elif command.lower() == "/llama370b":
@@ -131,7 +133,7 @@ def get_reply(message, image_data_64, session_id):
             },
             json=payload,
         )
-    elif model.startswith("openrouter"):
+    elif session_data[session_id]["provider"] == "openrouter":
         # if an openrouter model then strip of the string "openrouter:" from the beginning
         model = model[11:]
         payload = {
