@@ -495,7 +495,7 @@ def long_polling():
                 else:
                     keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
                     reply_markup = {'inline_keyboard': keyboard}
-                    send_message(chat_id, "Multiple models found, please select one:", reply_markup)
+                    send_message(chat_id, "Multiple models found, please select one:", reply_markup=reply_markup)
                     continue
 
             # Check for other commands to switch models (excluding /openrouter here)
