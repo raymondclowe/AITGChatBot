@@ -57,19 +57,12 @@ def update_model_version(session_id, command):
         session_data[session_id]["model_version"] = "claude-3-opus-20240229"
     elif command.lower() == "/claud3haiku":
         session_data[session_id]["model_version"] = "claude-3-haiku-20240307"
-    elif command.lower().startswith('/openrouter'):
-        # look for a second word, that will be the actual model
+    elif command.lower().startswith('/openrouter') and len(command.split()) == 2: # Handle single match here
         model_substring = command.split()[1]
         matching_models = get_matching_models(model_substring)
         if len(matching_models) == 1:
-            session_data[session_id]["model_version"] = matching_models[0]
+            session_data[session_id]["model_version"] = "openrouter:" + matching_models[0]
             session_data[session_id]["provider"] = "openrouter"
-        elif len(matching_models) > 1:
-            # Create inline keyboard with matching models
-            keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
-            reply_markup = {'inline_keyboard': keyboard}
-            send_message(chat_id, "Multiple models found, please select one:", reply_markup)
-            return
     elif command.lower() == "/llama38b":
         session_data[session_id]["model_version"] = "llama3-8b-8192"
     elif command.lower() == "/llama370b":
@@ -484,41 +477,33 @@ def long_polling():
                 send_message(chat_id, reply_text)
                 continue  # Skip the rest of the processing loop
                 
-            # Check for commands to switch models and set it in the session
-            if (
-                message_text.startswith("/gpt3")
-                or message_text.startswith("/gpt4")
-                or message_text.startswith("/claud3")
-                or message_text.startswith("/openrouter")
-                or  message_text.startswith("/llama3")
-            ):
-                if message_text.startswith("/openrouter"):
-                    # validate that there is a second word, being the model name
-                    if len(message_text.split()) == 1:
-                        reply_text = f"Please specify a model name after the command"
-                        send_message(chat_id, reply_text)
-                        continue
-                    # get the model name
-                    model_name = message_text.split()[1]
-                    # get the list of matching models
-                    matching_models = get_matching_models(model_name)
-                    if len(matching_models) == 0:
-                        reply_text = f"Model name {model_name} not found in list of models"
-                        send_message(chat_id, reply_text)
-                        continue
-                    elif len(matching_models) == 1:
-                        session_data[chat_id]["model_version"] = "openrouter:" + matching_models[0]
-                        reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
-                        send_message(chat_id, reply_text)
-                        continue
-                    else:
-                        reply_text = f"Multiple models match '{model_name}': " + ', '.join(matching_models)
-                        send_message(chat_id, reply_text)
-                        continue
+            # Handle /openrouter command in long_polling
+            if message_text.startswith("/openrouter"):
+                if len(message_text.split()) == 1:
+                    send_message(chat_id, "Please specify a model name after the command")
+                    continue
+                model_substring = message_text.split()[1]
+                matching_models = get_matching_models(model_substring)
+                if len(matching_models) == 0:
+                    send_message(chat_id, f"Model name {model_substring} not found in list of models")
+                    continue
+                elif len(matching_models) == 1:
+                    session_data[chat_id]["model_version"] = "openrouter:" + matching_models[0]
+                    session_data[chat_id]["provider"] = "openrouter"
+                    send_message(chat_id, f"Model has been changed to {session_data[chat_id]['model_version']}")
+                    continue
+                else:
+                    keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
+                    reply_markup = {'inline_keyboard': keyboard}
+                    send_message(chat_id, "Multiple models found, please select one:", reply_markup)
+                    continue
+
+            # Check for other commands to switch models (excluding /openrouter here)
+            elif message_text.startswith("/gpt3") or message_text.startswith("/gpt4") or message_text.startswith("/claud3") or message_text.startswith("/llama3"):
                 update_model_version(chat_id, message_text)
                 reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
                 send_message(chat_id, reply_text)
-                continue  # Skip the rest of the processing loop
+                continue
 
 
 
