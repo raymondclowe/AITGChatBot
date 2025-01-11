@@ -495,7 +495,7 @@ def long_polling():
                 else:
                     keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
                     reply_markup = {'inline_keyboard': keyboard}
-                    print(f'Keybord {keyboard}')
+                    # print(f'Keybord {keyboard}')
                     send_message(chat_id, "Multiple models found, please select one:", reply_markup=reply_markup)
                     continue
 
@@ -567,6 +567,7 @@ def long_polling():
 
 # Send a message to user
 def send_message(chat_id, text, reply_markup=None):
+    print(f'reply_markup {reply_markup} ')
     MAX_LENGTH = 4096
     def send_partial_message(chat_id, partial_text, reply_markup=None):        
         message_data = {
