@@ -1,10 +1,11 @@
-version = "1.4.0"
+version = "1.5.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
 # 1.2.0 - gpt4o support and set to default, increase max tokens to 4K for openai and 8K for Groq
 # 1.3.0 - openrouter substring matches
 # 1.4.0 - gpt4o-mini support and becomes the default
+# 1.5.0 - openrouter buttons
 
 import requests
 import base64
@@ -64,7 +65,11 @@ def update_model_version(session_id, command):
             session_data[session_id]["model_version"] = matching_models[0]
             session_data[session_id]["provider"] = "openrouter"
         elif len(matching_models) > 1:
-            print("More than one matching model")
+            # Create inline keyboard with matching models
+            keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
+            reply_markup = {'inline_keyboard': keyboard}
+            send_message(chat_id, "Multiple models found, please select one:", reply_markup)
+            return
     elif command.lower() == "/llama38b":
         session_data[session_id]["model_version"] = "llama3-8b-8192"
     elif command.lower() == "/llama370b":
@@ -361,10 +366,28 @@ def long_polling():
             latest_message = response.json()['result'][-1]
             offset = latest_message['update_id'] + 1
 
-            # Check if 'message' is in the latest_message
+            # Check if we have a message or callback query
             if 'message' in latest_message:
                 message_text = latest_message['message'].get('text', '')  # Use get() with a default value of ''
                 chat_id = latest_message['message']['chat']['id']
+            elif 'callback_query' in latest_message:
+                # Handle callback query from inline keyboard
+                callback_query = latest_message['callback_query']
+                chat_id = callback_query['message']['chat']['id']
+                selected_model = callback_query['data']
+                
+                # Update the model version
+                session_data[chat_id]["model_version"] = "openrouter:" + selected_model
+                session_data[chat_id]["provider"] = "openrouter"
+                
+                # Send confirmation message
+                send_message(chat_id, f"Model has been changed to {selected_model}")
+                
+                # Acknowledge the callback query
+                requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
+                    "callback_query_id": callback_query['id']
+                })
+                continue
             else:
                 continue
 
@@ -557,13 +580,16 @@ def long_polling():
             continue
 
 # Send a message to user
-def send_message(chat_id, text):
+def send_message(chat_id, text, reply_markup=None):
     MAX_LENGTH = 4096
-    def send_partial_message(chat_id, partial_text):        
-        response = requests.post(f"https://api.telegram.org/bot{BOT_KEY}/sendMessage", json={
+    def send_partial_message(chat_id, partial_text, reply_markup=None):        
+        message_data = {
             "chat_id": chat_id,
             "text": partial_text
-        })
+        }
+        if reply_markup:
+            message_data["reply_markup"] = reply_markup
+        response = requests.post(f"https://api.telegram.org/bot{BOT_KEY}/sendMessage", json=message_data)
         # For error cases, you might want to check if the request was successful:
         if not response.ok:
             # Print the reason for the error status code
