@@ -1,10 +1,11 @@
-version = "1.4.0"
+version = "1.5.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
 # 1.2.0 - gpt4o support and set to default, increase max tokens to 4K for openai and 8K for Groq
 # 1.3.0 - openrouter substring matches
 # 1.4.0 - gpt4o-mini support and becomes the default
+# 1.5.0 - openrouter buttons
 
 import requests
 import base64
