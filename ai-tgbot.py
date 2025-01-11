@@ -576,6 +576,7 @@ def send_message(chat_id, text, reply_markup=None):
         }
         if reply_markup:
             message_data["reply_markup"] = reply_markup
+        print(f'message_data {message_data} ')
     #    print(message_data)
         response = requests.post(f"https://api.telegram.org/bot{BOT_KEY}/sendMessage", json=message_data)
         # For error cases, you might want to check if the request was successful:
@@ -587,7 +588,7 @@ def send_message(chat_id, text, reply_markup=None):
     while text:
         # If the text is shorter than the maximum, send it as is
         if len(text) <= MAX_LENGTH:
-            send_partial_message(chat_id, text)
+            send_partial_message(chat_id, text, reply_markup=reply_markup)
             break
         # If the text is too long, split it into smaller parts
         else:
@@ -597,7 +598,7 @@ def send_message(chat_id, text, reply_markup=None):
             if split_at == -1:
                 split_at = MAX_LENGTH
             # Send the first part and shorten the remaining text
-            send_partial_message(chat_id, text[:split_at])
+            send_partial_message(chat_id, text[:split_at], reply_markup=reply_markup)
             text = text[split_at:]
 
 
