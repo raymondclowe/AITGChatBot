@@ -250,12 +250,13 @@ def get_reply(message, image_data_64, session_id):
         
         # Handle multipart responses (text + images)
         if raw_json["choices"]:
-            message_content = raw_json["choices"][0]["message"]["content"]
+            message = raw_json["choices"][0]["message"]
+            message_content = message["content"]
+            images_received = []
             
             # Check if content is a list (multipart) or string (text only)
             if isinstance(message_content, list):
                 response_parts = []
-                images_received = []
                 
                 for part in message_content:
                     if part.get("type") == "text" and part.get("text"):
@@ -288,14 +289,32 @@ def get_reply(message, image_data_64, session_id):
                             response_parts.append(f"[Unable to process inline data: {e}]")
                 
                 response_text = "\n".join(response_parts) if response_parts else "No text content received."
-                
-                # Send any images to Telegram
-                for image_data, mime_type in images_received:
-                    send_image_to_telegram(session_id, image_data, mime_type)
                     
             else:
-                # Simple string response
+                # Simple string response (OpenRouter format: text in content, images in separate array)
                 response_text = message_content.strip() if message_content else "API error occurred." + note
+                
+            # Check for images in separate images array (OpenRouter format)
+            if message.get("images"):
+                for image_item in message["images"]:
+                    if image_item.get("type") == "image_url" and image_item.get("image_url"):
+                        image_url = image_item["image_url"].get("url", "")
+                        if image_url.startswith("data:image/"):
+                            # Extract base64 data
+                            try:
+                                header, data = image_url.split(",", 1)
+                                mime_type = header.split(":")[1].split(";")[0]
+                                image_data = base64.b64decode(data)
+                                images_received.append((image_data, mime_type))
+                                print(f"Found image in separate images array: {len(image_data)} bytes, {mime_type}")
+                            except Exception as e:
+                                print(f"Error processing image from images array: {e}")
+                        else:
+                            print(f"Non-data image URL in images array: {image_url}")
+            
+            # Send any images to Telegram
+            for image_data, mime_type in images_received:
+                send_image_to_telegram(session_id, image_data, mime_type)
         else:
             response_text = "API error occurred." + note
             
