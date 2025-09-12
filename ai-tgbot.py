@@ -245,6 +245,8 @@ def get_reply(message, image_data_64, session_id):
 
     # Update tokens used and process the response based on the model used
     tokens_used = session_data[session_id]["tokens_used"]
+    images_received = []  # Initialize for all models
+    
     if model.startswith("gpt") or model.startswith("openrouter"):
         tokens_used += raw_json["usage"]["total_tokens"]
         
@@ -252,7 +254,6 @@ def get_reply(message, image_data_64, session_id):
         if raw_json["choices"]:
             message = raw_json["choices"][0]["message"]
             message_content = message["content"]
-            images_received = []
             
             # Check if content is a list (multipart) or string (text only)
             if isinstance(message_content, list):
@@ -351,10 +352,23 @@ def get_reply(message, image_data_64, session_id):
         print(f"Response text for llama3 model: {response_text}")
 
     # Update the conversation with the assistant response
+    assistant_content = [{"type": "text", "text": response_text}]
+    
+    # Add any generated images to the conversation history so they can be referenced
+    if images_received:
+        for image_data, mime_type in images_received:
+            # Convert image back to base64 data URL format for conversation history
+            image_b64 = base64.b64encode(image_data).decode('utf-8')
+            image_url = f"data:{mime_type};base64,{image_b64}"
+            assistant_content.append({
+                "type": "image_url",
+                "image_url": {"url": image_url}
+            })
+    
     assistant_response = [
         {
             "role": "assistant",
-            "content": [{"type": "text", "text": response_text}],
+            "content": assistant_content,
             # "datetime": datetime.now(),
         }
     ]
