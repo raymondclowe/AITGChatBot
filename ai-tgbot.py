@@ -1,4 +1,4 @@
-version = "1.5.0"
+version = "1.6.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -6,6 +6,7 @@ version = "1.5.0"
 # 1.3.0 - openrouter substring matches
 # 1.4.0 - gpt4o-mini support and becomes the default
 # 1.5.0 - openrouter buttons
+# 1.6.0 - image in and out
 
 import requests
 import base64
