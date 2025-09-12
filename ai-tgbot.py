@@ -234,9 +234,22 @@ def get_reply(message, image_data_64, session_id):
 
     # Handle the response
     raw_json = raw_response.json()
-    
-    print("Raw JSON response from AI backend:")
-    print(json.dumps(raw_json, indent=4 ))
+
+    def truncate_json(obj, max_length=500):
+        if isinstance(obj, dict):
+            return {k: truncate_json(v, max_length) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [truncate_json(v, max_length) for v in obj]
+        elif isinstance(obj, str):
+            if len(obj) > max_length:
+                return obj[:max_length] + "... [truncated] ..."
+            else:
+                return obj
+        else:
+            return obj
+
+    print("Raw JSON response from AI backend (truncated):")
+    print(json.dumps(truncate_json(raw_json), indent=4 ))
 
     if "error" in raw_json:
         print("Error detected in AI backend response.")
@@ -251,6 +264,29 @@ def get_reply(message, image_data_64, session_id):
             if raw_json["choices"]
             else "API error occurred." + note
         )
+        
+        # Check if the response contains generated images (e.g., from Gemini models)
+        if (raw_json["choices"] and 
+            "message" in raw_json["choices"][0] and 
+            "images" in raw_json["choices"][0]["message"] and 
+            raw_json["choices"][0]["message"]["images"]):
+            
+            images = raw_json["choices"][0]["message"]["images"]
+            for img in images:
+                if img.get("type") == "image_url" and img.get("image_url", {}).get("url"):
+                    image_url = img["image_url"]["url"]
+                    if image_url.startswith("data:image/"):
+                        # Extract the base64 data and send as photo to Telegram
+                        try:
+                            import re
+                            base64_match = re.search(r'data:image/[^;]+;base64,(.+)', image_url)
+                            if base64_match:
+                                base64_data = base64_match.group(1)
+                                # Send the image to Telegram
+                                send_image_to_telegram(session_id, base64_data)
+                        except Exception as e:
+                            print(f"Error processing generated image: {e}")
+        
         print(f"Response text for gpt or openrouter model: {response_text}")
     elif model.startswith("claud"):
         tokens_used += (
@@ -305,6 +341,31 @@ def download_image(file_path):
     file_url = f"https://api.telegram.org/file/bot{BOT_KEY}/{file_path}"
     response = requests.get(file_url)
     return response.content
+
+
+# Function to send image to Telegram
+def send_image_to_telegram(chat_id, base64_data):
+    try:
+        # Decode base64 data
+        image_data = base64.b64decode(base64_data)
+        
+        # Send as photo to Telegram
+        files = {'photo': ('image.png', image_data, 'image/png')}
+        data = {'chat_id': chat_id}
+        
+        response = requests.post(
+            f"https://api.telegram.org/bot{BOT_KEY}/sendPhoto",
+            files=files,
+            data=data
+        )
+        
+        if response.ok:
+            print(f"Successfully sent generated image to chat {chat_id}")
+        else:
+            print(f"Failed to send image: {response.text}")
+            
+    except Exception as e:
+        print(f"Error sending image to Telegram: {e}")
 
 
 # get list from https://openrouter.ai/api/v1/models
@@ -567,6 +628,8 @@ def long_polling():
 
 # Send a message to user
 def send_message(chat_id, text, reply_markup=None):
+    print(f'send_message to {chat_id} text length {len(text)} ')
+    print(f'text {text[:50]}...')  # print first 50 characters of text
     print(f'reply_markup {reply_markup} ')
     MAX_LENGTH = 4096
     def send_partial_message(chat_id, partial_text, reply_markup=None):        
