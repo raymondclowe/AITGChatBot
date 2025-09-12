@@ -612,16 +612,36 @@ def long_polling():
                 reply_text += "/claud3haiku - set the model to Claud 3 Haiku\n"
                 reply_text += "/llama38b - set the model to Llama 3 8B\n"
                 reply_text += "/llama370b - set the model to Llama 3 70B\n"
-                reply_text += "/listopenroutermodels - list all openrouter models\n"
+                reply_text += "/listopenroutermodels - list all openrouter models with image capabilities\n"
                 reply_text += "/openrouter <model id> - set the model to the model with the given id\n"
-                reply_text += "/status - get the chatbot status, current model, current max rounds, current conversation length"
+                reply_text += "/status - get the chatbot status, current model, current max rounds, current conversation length\n\n"
+                reply_text += "📷 Image Features:\n"
+                reply_text += "• Send images with text to vision-capable models for analysis\n"
+                reply_text += "• Models with 📷 support image input (vision)\n"  
+                reply_text += "• Models with 🎨 support image output (generation)\n"
+                reply_text += "• OpenRouter models automatically support images when capable"
 
                 send_message(chat_id, reply_text)
                 continue  # Skip the rest of the processing loop
 
             if message_text.startswith('/status'):
-                reply_text = f"Model: {session_data[chat_id]['model_version']}\n"
+                current_model = session_data[chat_id]['model_version']
+                reply_text = f"Model: {current_model}\n"
                 reply_text += f"Provider: {session_data[chat_id].get('provider', 'Not set')}\n"
+                
+                # Show image capabilities for OpenRouter models
+                if current_model.startswith("openrouter:"):
+                    model_id = current_model[11:]  # Remove "openrouter:" prefix
+                    capability_msg = get_model_capability_message(model_id)
+                    if capability_msg:
+                        reply_text += f"Image capabilities: {capability_msg.replace('🖼️ This model supports: ', '')}\n"
+                    else:
+                        reply_text += "Image capabilities: None\n"
+                elif any(current_model.startswith(prefix) for prefix in ["gpt-4o", "gpt-4-turbo", "claude-3"]):
+                    reply_text += "Image capabilities: 📷 Image input (vision)\n"
+                else:
+                    reply_text += "Image capabilities: None\n"
+                
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
                 reply_text += f"Chatbot version: {version}\n"
