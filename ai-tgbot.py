@@ -12,6 +12,7 @@ import base64
 import os
 import json
 from datetime import datetime
+import time
 
 # Get the API keys from the environment variables
 API_KEY = os.environ.get('API_KEY')
@@ -246,11 +247,58 @@ def get_reply(message, image_data_64, session_id):
     tokens_used = session_data[session_id]["tokens_used"]
     if model.startswith("gpt") or model.startswith("openrouter"):
         tokens_used += raw_json["usage"]["total_tokens"]
-        response_text = (
-            raw_json["choices"][0]["message"]["content"].strip()
-            if raw_json["choices"]
-            else "API error occurred." + note
-        )
+        
+        # Handle multipart responses (text + images)
+        if raw_json["choices"]:
+            message_content = raw_json["choices"][0]["message"]["content"]
+            
+            # Check if content is a list (multipart) or string (text only)
+            if isinstance(message_content, list):
+                response_parts = []
+                images_received = []
+                
+                for part in message_content:
+                    if part.get("type") == "text" and part.get("text"):
+                        response_parts.append(part["text"])
+                    elif part.get("type") == "image_url" and part.get("image_url"):
+                        # Handle image responses
+                        image_url = part["image_url"].get("url", "")
+                        if image_url.startswith("data:image/"):
+                            # Extract base64 data
+                            try:
+                                header, data = image_url.split(",", 1)
+                                mime_type = header.split(":")[1].split(";")[0]
+                                image_data = base64.b64decode(data)
+                                images_received.append((image_data, mime_type))
+                                response_parts.append(f"[Image generated: {len(image_data)} bytes, {mime_type}]")
+                            except Exception as e:
+                                response_parts.append(f"[Unable to process image: {e}]")
+                        else:
+                            response_parts.append(f"[Image URL: {image_url}]")
+                    elif part.get("inline_data"):
+                        # Handle Gemini-style inline data
+                        inline_data = part["inline_data"]
+                        mime_type = inline_data.get("mimeType", "unknown")
+                        data = inline_data.get("data", "")
+                        try:
+                            image_data = base64.b64decode(data)
+                            images_received.append((image_data, mime_type))
+                            response_parts.append(f"[Image generated: {len(image_data)} bytes, {mime_type}]")
+                        except Exception as e:
+                            response_parts.append(f"[Unable to process inline data: {e}]")
+                
+                response_text = "\n".join(response_parts) if response_parts else "No text content received."
+                
+                # Send any images to Telegram
+                for image_data, mime_type in images_received:
+                    send_image_to_telegram(session_id, image_data, mime_type)
+                    
+            else:
+                # Simple string response
+                response_text = message_content.strip() if message_content else "API error occurred." + note
+        else:
+            response_text = "API error occurred." + note
+            
         print(f"Response text for gpt or openrouter model: {response_text}")
     elif model.startswith("claud"):
         tokens_used += (
@@ -311,10 +359,22 @@ def download_image(file_path):
 def list_openrouter_models_as_message():
     response = requests.get(f"https://openrouter.ai/api/v1/models")
     openRouterModelList = response.json()['data']
-    model_list = "Model ID : Model Name\n\n"
-    for model in openRouterModelList:  # include only id and name fields
-        model_list += f"{model['id']} : {model['name']}\n"
-    model_list += "\n\nOr choose from the best ranked at https://openrouter.ai/rankings"
+    capabilities = get_openrouter_model_capabilities()
+    
+    model_list = "Model ID : Model Name : Image Input : Image Output\n\n"
+    for model in openRouterModelList:  # include id, name, and image capabilities
+        model_id = model['id']
+        model_name = model['name']
+        caps = capabilities.get(model_id, {})
+        
+        # Image capability indicators
+        img_in = "📷 Yes" if caps.get('image_input', False) else "No"
+        img_out = "🎨 Yes" if caps.get('image_output', False) else "No"
+        
+        model_list += f"{model_id} : {model_name} : {img_in} : {img_out}\n"
+    
+    model_list += "\n\n📷 = Image input (vision analysis)\n🎨 = Image output (generation)\n"
+    model_list += "Or choose from the best ranked at https://openrouter.ai/rankings"
     return model_list
 
 
@@ -326,6 +386,125 @@ def list_openrouter_models_as_list():
     for model in openRouterModelList:
         model_list.append(model['id'])
     return model_list
+
+# Cache for model capabilities
+_model_capabilities_cache = None
+_cache_timestamp = 0
+CACHE_DURATION = 3600  # 1 hour in seconds
+
+def get_openrouter_model_capabilities():
+    """Fetch and cache OpenRouter model capabilities"""
+    global _model_capabilities_cache, _cache_timestamp
+    
+    current_time = time.time()
+    
+    # Return cached data if still valid
+    if _model_capabilities_cache and (current_time - _cache_timestamp) < CACHE_DURATION:
+        return _model_capabilities_cache
+    
+    try:
+        # Try with API key first
+        api_key = os.environ.get('COPILOT_DEV_KEY') or os.environ.get('OPENROUTER_API_KEY')
+        headers = {}
+        if api_key:
+            headers['Authorization'] = f'Bearer {api_key}'
+            
+        response = requests.get('https://openrouter.ai/api/v1/models', headers=headers)
+        
+        if response.status_code == 200:
+            models_data = response.json()
+            capabilities = {}
+            
+            if 'data' in models_data:
+                for model in models_data['data']:
+                    model_id = model['id']
+                    arch = model.get('architecture', {})
+                    input_mods = arch.get('input_modalities', [])
+                    output_mods = arch.get('output_modalities', [])
+                    
+                    capabilities[model_id] = {
+                        'name': model.get('name', model_id),
+                        'description': model.get('description', ''),
+                        'image_input': 'image' in input_mods,
+                        'image_output': 'image' in output_mods,
+                        'context_length': model.get('context_length', 0),
+                        'pricing': model.get('pricing', {})
+                    }
+                
+                _model_capabilities_cache = capabilities
+                _cache_timestamp = current_time
+                return capabilities
+        
+        # Fallback: pattern matching if API fails
+        return get_openrouter_capabilities_fallback()
+        
+    except Exception as e:
+        print(f"Error fetching model capabilities: {e}")
+        return get_openrouter_capabilities_fallback()
+
+def get_openrouter_capabilities_fallback():
+    """Fallback to pattern matching when API is unavailable"""
+    try:
+        response = requests.get('https://openrouter.ai/api/v1/models')
+        if response.status_code == 200:
+            models_data = response.json()
+            capabilities = {}
+            
+            if 'data' in models_data:
+                for model in models_data['data']:
+                    model_id = model['id']
+                    model_name = model.get('name', '').lower()
+                    model_desc = model.get('description', '').lower()
+                    
+                    # Pattern matching for vision capabilities
+                    vision_patterns = ['vision', 'image', 'multimodal', 'visual', 'photo', 'picture']
+                    image_gen_patterns = ['image-preview', 'generate', 'creation']
+                    
+                    # Check for vision in name, description, or known model patterns
+                    has_vision = (
+                        any(pattern in model_name for pattern in vision_patterns) or
+                        any(pattern in model_desc for pattern in vision_patterns) or
+                        any(pattern in model_id.lower() for pattern in [
+                            'gpt-4o', 'gpt-4-vision', 'gpt-4-turbo', 'claude-3', 'gemini', 
+                            'llava', 'cogvlm', 'qwen-vl', 'internvl', 'minicpm-v'
+                        ])
+                    )
+                    
+                    has_image_gen = (
+                        any(pattern in model_id.lower() for pattern in image_gen_patterns) or
+                        'image-preview' in model_id.lower()
+                    )
+                    
+                    capabilities[model_id] = {
+                        'name': model.get('name', model_id),
+                        'description': model.get('description', ''),
+                        'image_input': has_vision,
+                        'image_output': has_image_gen,
+                        'context_length': model.get('context_length', 0),
+                        'pricing': model.get('pricing', {})
+                    }
+                
+                return capabilities
+    except Exception as e:
+        print(f"Error in fallback pattern matching: {e}")
+    
+    return {}
+
+def get_model_capability_message(model_id):
+    """Get image capability message for a model"""
+    capabilities = get_openrouter_model_capabilities()
+    caps = capabilities.get(model_id, {})
+    
+    capability_parts = []
+    if caps.get('image_input', False):
+        capability_parts.append("📷 Image input (vision analysis)")
+    if caps.get('image_output', False):
+        capability_parts.append("🎨 Image output (generation)")
+    
+    if capability_parts:
+        return f"🖼️ This model supports: {', '.join(capability_parts)}"
+    else:
+        return ""
 
 def get_matching_models(substring):
     all_models = list_openrouter_models_as_list()
@@ -373,8 +552,14 @@ def long_polling():
                 session_data[chat_id]["model_version"] = "openrouter:" + selected_model
                 session_data[chat_id]["provider"] = "openrouter"
                 
-                # Send confirmation message
-                send_message(chat_id, f"Model has been changed to {selected_model}")
+                # Send confirmation message with capabilities
+                capability_msg = get_model_capability_message(selected_model)
+                base_msg = f"Model has been changed to {selected_model}"
+                if capability_msg:
+                    full_msg = f"{base_msg}\n{capability_msg}"
+                else:
+                    full_msg = base_msg
+                send_message(chat_id, full_msg)
                 
                 # Acknowledge the callback query
                 requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
@@ -488,9 +673,18 @@ def long_polling():
                     send_message(chat_id, f"Model name {model_substring} not found in list of models")
                     continue
                 elif len(matching_models) == 1:
-                    session_data[chat_id]["model_version"] = "openrouter:" + matching_models[0]
+                    model_id = matching_models[0]
+                    session_data[chat_id]["model_version"] = "openrouter:" + model_id
                     session_data[chat_id]["provider"] = "openrouter"
-                    send_message(chat_id, f"Model has been changed to {session_data[chat_id]['model_version']}")
+                    
+                    # Send confirmation message with capabilities
+                    capability_msg = get_model_capability_message(model_id)
+                    base_msg = f"Model has been changed to {session_data[chat_id]['model_version']}"
+                    if capability_msg:
+                        full_msg = f"{base_msg}\n{capability_msg}"
+                    else:
+                        full_msg = base_msg
+                    send_message(chat_id, full_msg)
                     continue
                 else:
                     keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
@@ -600,6 +794,59 @@ def send_message(chat_id, text, reply_markup=None):
             # Send the first part and shorten the remaining text
             send_partial_message(chat_id, text[:split_at], reply_markup=reply_markup)
             text = text[split_at:]
+
+
+def send_image_to_telegram(chat_id, image_data, mime_type):
+    """Send an image to Telegram"""
+    try:
+        # Determine file extension from MIME type
+        ext_map = {
+            'image/jpeg': 'jpg',
+            'image/jpg': 'jpg', 
+            'image/png': 'png',
+            'image/gif': 'gif',
+            'image/webp': 'webp'
+        }
+        ext = ext_map.get(mime_type, 'jpg')
+        
+        # Prepare the photo data
+        files = {
+            'photo': (f'generated_image.{ext}', image_data, mime_type)
+        }
+        data = {
+            'chat_id': chat_id,
+            'caption': f'Generated image ({len(image_data)} bytes, {mime_type})'
+        }
+        
+        # Send the photo
+        response = requests.post(
+            f"https://api.telegram.org/bot{BOT_KEY}/sendPhoto",
+            files=files,
+            data=data
+        )
+        
+        if not response.ok:
+            print(f"Error sending image: {response.reason}")
+            # Fallback: send as document if photo fails
+            files = {
+                'document': (f'generated_image.{ext}', image_data, mime_type)
+            }
+            data = {
+                'chat_id': chat_id,
+                'caption': f'Generated image ({len(image_data)} bytes, {mime_type})'
+            }
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_KEY}/sendDocument",
+                files=files,
+                data=data
+            )
+            if not response.ok:
+                print(f"Error sending image as document: {response.reason}")
+                
+    except Exception as e:
+        print(f"Exception sending image: {e}")
+        # Send text message as fallback
+        send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed.")
 
 
 long_polling()
