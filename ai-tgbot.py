@@ -319,9 +319,9 @@ def convert_inline_latex_to_telegram(text):
         result_parts = []
         for part in parts:
             if re.match(r'^[a-zA-Z]+$', part) and len(part) <= 3:  # Short variable names
-                result_parts.append(f'*{escape_markdown(part)}*')
+                result_parts.append(f'*{part}*')
             else:
-                result_parts.append(escape_markdown(part))
+                result_parts.append(part)
         
         return ''.join(result_parts)
 
@@ -329,8 +329,8 @@ def convert_inline_latex_to_telegram(text):
     last_end = 0
 
     for match in re.finditer(inline_latex_pattern, text):
-        # Append the text before the inline LaTeX expression, Markdown-escaped
-        result.append(escape_markdown(text[last_end:match.start()]))
+        # Append the text before the inline LaTeX expression
+        result.append(text[last_end:match.start()])
 
         content = match.group(1).strip()
         converted = convert_latex_content(content)
@@ -339,7 +339,7 @@ def convert_inline_latex_to_telegram(text):
         last_end = match.end()
 
     # Append any remaining text after the last match
-    result.append(escape_markdown(text[last_end:]))
+    result.append(text[last_end:])
 
     return ''.join(result)
 
@@ -357,7 +357,7 @@ def process_ai_response(response_text, chat_id):
 
     if not latex_blocks:
         formatted_text = convert_inline_latex_to_telegram(response_text)
-        send_message(chat_id, formatted_text, parse_mode="MarkdownV2")
+        send_message(chat_id, formatted_text, parse_mode="Markdown")
         return
     
     # Split text around LaTeX blocks and send sequentially
@@ -370,7 +370,7 @@ def process_ai_response(response_text, chat_id):
             if text_before_raw.strip():
                 formatted_text = convert_inline_latex_to_telegram(text_before_raw)
                 if formatted_text:
-                    send_message(chat_id, formatted_text, parse_mode="MarkdownV2")
+                    send_message(chat_id, formatted_text, parse_mode="Markdown")
         
         # Render and send LaTeX as image
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
@@ -385,12 +385,12 @@ def process_ai_response(response_text, chat_id):
                     # Fallback: send as code block if image sending fails
                     escaped_content = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', block['content'])
                     fallback_message = f"```latex\n{escaped_content}\n```"
-                    send_message(chat_id, fallback_message, parse_mode="MarkdownV2")
+                    send_message(chat_id, fallback_message, parse_mode="Markdown")
             else:
                 # Fallback: send as code block if rendering fails
                 escaped_content = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', block['content'])
                 fallback_message = f"```latex\n{escaped_content}\n```"
-                send_message(chat_id, fallback_message, parse_mode="MarkdownV2")
+                send_message(chat_id, fallback_message, parse_mode="Markdown")
         finally:
             # Clean up temp file
             try:
@@ -406,7 +406,7 @@ def process_ai_response(response_text, chat_id):
         if text_after_raw.strip():
             formatted_text = convert_inline_latex_to_telegram(text_after_raw)
             if formatted_text:
-                send_message(chat_id, formatted_text, parse_mode="MarkdownV2")
+                send_message(chat_id, formatted_text, parse_mode="Markdown")
 
 
 def get_reply(message, image_data_64, session_id):
@@ -1039,7 +1039,7 @@ def long_polling():
                 reply_text += "/currentprofile - show current active profile\n"
                 reply_text += "/deactivate - return to default configuration"
 
-                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
+                send_message(chat_id, reply_text, parse_mode="Markdown")
                 continue  # Skip the rest of the processing loop
 
             if message_text.startswith('/status'):
@@ -1074,13 +1074,13 @@ def long_polling():
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
                 reply_text += f"Chatbot version: {version}\n"
-                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
+                send_message(chat_id, reply_text, parse_mode="Markdown")
                 continue
 
             if message_text.startswith('/maxrounds'):
                 if len(message_text.split()) == 1:
                     reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
-                    send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
+                    send_message(chat_id, reply_text, parse_mode="Markdown")
                     continue
 
                 max_rounds = DEFAULT_MAX_ROUNDS
@@ -1102,7 +1102,7 @@ def long_polling():
             if message_text.startswith('/clear'):
                 clear_context(chat_id)
                 reply_text = f"Context cleared"
-                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
+                send_message(chat_id, reply_text, parse_mode="Markdown")
                 continue  # Skip the rest of the processing loop
 
             # Handle profile activation
@@ -1118,15 +1118,15 @@ def long_polling():
                         reply += "\n\nUse: /activate <profile_name>"
                     else:
                         reply = "No profiles available."
-                    send_message(chat_id, escape_markdown(reply), parse_mode="MarkdownV2")
+                    send_message(chat_id, reply, parse_mode="Markdown")
                     continue
                 
                 profile_name = parts[1]
                 success, message, greeting = load_profile(profile_name, chat_id)
                 
-                send_message(chat_id, message, parse_mode="MarkdownV2")
+                send_message(chat_id, message, parse_mode="Markdown")
                 if success and greeting:
-                    send_message(chat_id, escape_markdown(greeting), parse_mode="MarkdownV2")
+                    send_message(chat_id, greeting, parse_mode="Markdown")
                 continue
 
             # Handle list profiles command
@@ -1177,12 +1177,12 @@ def long_polling():
             # Handle /openrouter command in long_polling
             if message_text.startswith("/openrouter"):
                 if len(message_text.split()) == 1:
-                    send_message(chat_id, escape_markdown("Please specify a model name after the command"), parse_mode="MarkdownV2")
+                    send_message(chat_id, "Please specify a model name after the command", parse_mode="Markdown")
                     continue
                 model_substring = message_text.split()[1]
                 matching_models = get_matching_models(model_substring)
                 if len(matching_models) == 0:
-                    send_message(chat_id, escape_markdown(f"Model name {model_substring} not found in list of models"), parse_mode="MarkdownV2")
+                    send_message(chat_id, f"Model name {model_substring} not found in list of models", parse_mode="Markdown")
                     continue
                 elif len(matching_models) == 1:
                     model_id = matching_models[0]
@@ -1196,7 +1196,7 @@ def long_polling():
                         full_msg = f"{base_msg}\n{capability_msg}"
                     else:
                         full_msg = base_msg
-                    send_message(chat_id, escape_markdown(full_msg), parse_mode="MarkdownV2")
+                    send_message(chat_id, full_msg, parse_mode="Markdown")
                     continue
                 else:
                     keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
@@ -1209,7 +1209,7 @@ def long_polling():
             elif message_text.startswith("/gpt3") or message_text.startswith("/gpt4") or message_text.startswith("/claud3") or message_text.startswith("/llama3"):
                 update_model_version(chat_id, message_text)
                 reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
-                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
+                send_message(chat_id, reply_text, parse_mode="Markdown")
                 continue
 
 
@@ -1311,7 +1311,7 @@ def send_message(chat_id, text, reply_markup=None, parse_mode=None):
             if split_at == -1:
                 split_at = MAX_LENGTH
             # Send the first part and shorten the remaining text
-            send_partial_message(chat_id, text[:split_at], reply_markup=reply_markup)
+            send_partial_message(chat_id, text[:split_at], reply_markup=reply_markup, parse_mode=use_parse_mode)
             text = text[split_at:]
 
 
@@ -1365,7 +1365,7 @@ def send_image_to_telegram(chat_id, image_data, mime_type):
     except Exception as e:
         print(f"Exception sending image: {e}")
         # Send text message as fallback
-        send_message(chat_id, escape_markdown(f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed."), parse_mode="MarkdownV2")
+        send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed.", parse_mode="Markdown")
 
 
 long_polling()
