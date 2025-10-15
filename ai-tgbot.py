@@ -224,7 +224,7 @@ def render_latex_to_image(latex_code, output_path):
         text = fig.text(0.5, 0.5, f'${latex_code}$', 
                        horizontalalignment='center',
                        verticalalignment='center',
-                       fontsize=10, color='white')
+                       fontsize=8, color='white')
         
         # Save with tight bounding box
         plt.savefig(output_path, bbox_inches='tight', 
@@ -266,16 +266,64 @@ def send_photo_to_telegram(chat_id, image_path, caption=None):
 def convert_inline_latex_to_telegram(text):
     """Convert inline LaTeX expressions to Telegram MarkdownV2 formatting."""
     inline_latex_pattern = r'\\+\(\s*(.*?)\s*\\+\)'
-    simple_var_pattern = r'^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+)*$'
-    var_pattern = re.compile(r'\b([a-zA-Z](?:[a-zA-Z0-9]*)?)\b')
-    common_words = {
-        'a', 'an', 'the', 'is', 'are', 'and', 'or', 'of', 'in', 'to', 'for',
-        'with', 'by', 'at', 'on', 'as', 'if', 'it'
+    
+    # Greek letters and common symbols mapping
+    greek_letters = {
+        'alpha': 'α', 'beta': 'β', 'gamma': 'γ', 'delta': 'δ', 'epsilon': 'ε',
+        'zeta': 'ζ', 'eta': 'η', 'theta': 'θ', 'iota': 'ι', 'kappa': 'κ',
+        'lambda': 'λ', 'mu': 'μ', 'nu': 'ν', 'xi': 'ξ', 'omicron': 'ο',
+        'pi': 'π', 'rho': 'ρ', 'sigma': 'σ', 'tau': 'τ', 'upsilon': 'υ',
+        'phi': 'φ', 'chi': 'χ', 'psi': 'ψ', 'omega': 'ω',
+        'Alpha': 'Α', 'Beta': 'Β', 'Gamma': 'Γ', 'Delta': 'Δ', 'Epsilon': 'Ε',
+        'Zeta': 'Ζ', 'Eta': 'Η', 'Theta': 'Θ', 'Iota': 'Ι', 'Kappa': 'Κ',
+        'Lambda': 'Λ', 'Mu': 'Μ', 'Nu': 'Ν', 'Xi': 'Ξ', 'Omicron': 'Ο',
+        'Pi': 'Π', 'Rho': 'Ρ', 'Sigma': 'Σ', 'Tau': 'Τ', 'Upsilon': 'Υ',
+        'Phi': 'Φ', 'Chi': 'Χ', 'Psi': 'Ψ', 'Omega': 'Ω'
+    }
+    
+    # Common mathematical operators and symbols
+    math_symbols = {
+        'times': '×', 'div': '÷', 'pm': '±', 'mp': '∓', 'cdot': '⋅',
+        'leq': '≤', 'geq': '≥', 'neq': '≠', 'approx': '≈', 'equiv': '≡',
+        'subset': '⊂', 'supset': '⊃', 'subseteq': '⊆', 'supseteq': '⊇',
+        'in': '∈', 'notin': '∉', 'forall': '∀', 'exists': '∃', 'nabla': '∇',
+        'partial': '∂', 'infty': '∞', 'sum': '∑', 'prod': '∏', 'int': '∫',
+        'oint': '∮', 'sqrt': '√', 'propto': '∝', 'perp': '⊥', 'parallel': '∥',
+        'angle': '∠', 'triangle': '△', 'square': '□', 'diamond': '◇'
     }
 
     def escape_markdown(text):
         """Escape special MarkdownV2 characters."""
         return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+
+    def convert_latex_content(content):
+        """Convert LaTeX content to Telegram-compatible formatting."""
+        # Handle Greek letters
+        for latex_name, unicode_symbol in greek_letters.items():
+            content = re.sub(r'\\' + latex_name + r'\b', unicode_symbol, content)
+        
+        # Handle common mathematical symbols
+        for latex_name, unicode_symbol in math_symbols.items():
+            content = re.sub(r'\\' + latex_name + r'\b', unicode_symbol, content)
+        
+        # Handle fractions (simple case)
+        content = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'\1/\2', content)
+        
+        # Handle superscripts and subscripts (simple cases) - convert to plain text for now
+        content = re.sub(r'_(\w+)', r'\1', content)  # Remove subscripts
+        content = re.sub(r'\^(\w+)', r'\1', content)  # Remove superscripts
+        
+        # For now, italicize remaining variables (single letters or simple names)
+        # Split by operators and spaces, italicize alphabetic parts
+        parts = re.split(r'(\W+)', content)
+        result_parts = []
+        for part in parts:
+            if re.match(r'^[a-zA-Z]+$', part) and len(part) <= 3:  # Short variable names
+                result_parts.append(f'*{escape_markdown(part)}*')
+            else:
+                result_parts.append(escape_markdown(part))
+        
+        return ''.join(result_parts)
 
     result = []
     last_end = 0
@@ -285,33 +333,8 @@ def convert_inline_latex_to_telegram(text):
         result.append(escape_markdown(text[last_end:match.start()]))
 
         content = match.group(1).strip()
-
-        if re.match(simple_var_pattern, content):
-            # Simple variable name -> underline
-            result.append(f'__{escape_markdown(content)}__')
-        else:
-            formatted_parts = []
-            sub_last = 0
-            for var_match in var_pattern.finditer(content):
-                # Add text before the variable, escaped
-                if var_match.start() > sub_last:
-                    formatted_parts.append(escape_markdown(content[sub_last:var_match.start()]))
-
-                var_name = var_match.group(1)
-                if var_name.lower() in common_words and len(var_name) > 1:
-                    formatted_parts.append(escape_markdown(var_name))
-                else:
-                    formatted_parts.append(f'_{escape_markdown(var_name)}_')
-
-                sub_last = var_match.end()
-
-            if sub_last < len(content):
-                formatted_parts.append(escape_markdown(content[sub_last:]))
-
-            if formatted_parts:
-                result.append(''.join(formatted_parts))
-            else:
-                result.append(escape_markdown(content))
+        converted = convert_latex_content(content)
+        result.append(converted)
 
         last_end = match.end()
 
