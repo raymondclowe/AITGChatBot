@@ -1,4 +1,4 @@
-version = "1.6.0"
+version = "1.7.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -7,6 +7,7 @@ version = "1.6.0"
 # 1.4.0 - gpt4o-mini support and becomes the default
 # 1.5.0 - openrouter buttons
 # 1.6.0 - image in and out
+# 1.7.0 - profile system and LaTeX support
 
 import requests
 import base64
@@ -14,6 +15,11 @@ import os
 import json
 from datetime import datetime
 import time
+import re
+import tempfile
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
 
 # Get the API keys from the environment variables
 API_KEY = os.environ.get('API_KEY')
@@ -150,6 +156,159 @@ def load_profile(profile_name, chat_id):
         
     except Exception as e:
         return False, f"Error loading profile: {str(e)}", None
+
+
+# LaTeX rendering functions
+def detect_latex_blocks(text):
+    """
+    Detect LaTeX blocks in text using multiple patterns.
+    Returns list of dicts with 'start', 'end', 'content', 'full_match' keys.
+    """
+    patterns = [
+        r'```latex\s*\n(.*?)\n\s*```',  # Code block format with optional whitespace
+        r'\$\$(.*?)\$\$',                # Display math format
+        r'\\\[(.*?)\\\]',                # LaTeX display format
+    ]
+    
+    latex_blocks = []
+    for pattern in patterns:
+        matches = re.finditer(pattern, text, re.DOTALL)
+        for match in matches:
+            latex_blocks.append({
+                'start': match.start(),
+                'end': match.end(),
+                'content': match.group(1).strip(),
+                'full_match': match.group(0)
+            })
+    
+    # Sort by position and remove duplicates
+    latex_blocks.sort(key=lambda x: x['start'])
+    
+    # Remove overlapping blocks (keep first occurrence)
+    filtered_blocks = []
+    last_end = -1
+    for block in latex_blocks:
+        if block['start'] >= last_end:
+            filtered_blocks.append(block)
+            last_end = block['end']
+    
+    return filtered_blocks
+
+
+def render_latex_to_image(latex_code, output_path):
+    """
+    Render LaTeX code to an image using matplotlib.
+    
+    Args:
+        latex_code: LaTeX expression to render
+        output_path: Path to save the PNG image
+    
+    Returns:
+        bool: True if rendering succeeded, False otherwise
+    """
+    try:
+        # Create figure with transparent background
+        fig = plt.figure(figsize=(10, 2))
+        fig.patch.set_alpha(0.0)
+        
+        # Render LaTeX
+        text = fig.text(0.5, 0.5, f'${latex_code}$', 
+                       horizontalalignment='center',
+                       verticalalignment='center',
+                       fontsize=20)
+        
+        # Save with tight bounding box
+        plt.savefig(output_path, bbox_inches='tight', 
+                   pad_inches=0.1, transparent=True, dpi=150)
+        plt.close(fig)
+        
+        return True
+        
+    except Exception as e:
+        print(f"LaTeX rendering failed: {e}")
+        try:
+            plt.close('all')
+        except:
+            pass
+        return False
+
+
+def send_photo_to_telegram(chat_id, image_path, caption=None):
+    """Send a photo file to Telegram."""
+    try:
+        with open(image_path, 'rb') as photo:
+            files = {'photo': photo}
+            data = {'chat_id': chat_id}
+            if caption:
+                data['caption'] = caption
+            
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_KEY}/sendPhoto",
+                files=files,
+                data=data
+            )
+            
+            return response.ok
+    except Exception as e:
+        print(f"Error sending photo: {e}")
+        return False
+
+
+def process_ai_response(response_text, chat_id):
+    """
+    Process AI response, extract LaTeX, render to images, and send messages.
+    
+    Args:
+        response_text: The text response from the AI
+        chat_id: Telegram chat ID to send messages to
+    """
+    latex_blocks = detect_latex_blocks(response_text)
+    
+    if not latex_blocks:
+        # No LaTeX, send as normal text
+        send_message(chat_id, response_text)
+        return
+    
+    # Split text around LaTeX blocks and send sequentially
+    last_pos = 0
+    
+    for i, block in enumerate(latex_blocks):
+        # Send text before this LaTeX block
+        if block['start'] > last_pos:
+            text_before = response_text[last_pos:block['start']].strip()
+            if text_before:
+                send_message(chat_id, text_before)
+        
+        # Render and send LaTeX as image
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            image_path = tmp.name
+        
+        try:
+            if render_latex_to_image(block['content'], image_path):
+                # Send the image
+                caption = f"LaTeX: {block['content'][:100]}" if len(block['content']) <= 100 else f"LaTeX: {block['content'][:97]}..."
+                if send_photo_to_telegram(chat_id, image_path, caption):
+                    print(f"Successfully sent LaTeX image for block {i}")
+                else:
+                    # Fallback: send as code block if image sending fails
+                    send_message(chat_id, f"```latex\n{block['content']}\n```")
+            else:
+                # Fallback: send as code block if rendering fails
+                send_message(chat_id, f"```latex\n{block['content']}\n```")
+        finally:
+            # Clean up temp file
+            try:
+                os.remove(image_path)
+            except:
+                pass
+        
+        last_pos = block['end']
+    
+    # Send any remaining text after last LaTeX block
+    if last_pos < len(response_text):
+        text_after = response_text[last_pos:].strip()
+        if text_after:
+            send_message(chat_id, text_after)
 
 
 def get_reply(message, image_data_64, session_id):
@@ -984,7 +1143,8 @@ def long_polling():
         try:            
            # Get reply from OpenAI and send it back to the user
             reply_text, tokens_used = get_reply(message_text, image_data_base64, chat_id)
-            send_message(chat_id, reply_text )
+            # Process response for LaTeX and send
+            process_ai_response(reply_text, chat_id)
 
         except Exception as e:
             print(f"Error getting reply  on line {e.__traceback__.tb_lineno}: {e}")
