@@ -145,6 +145,7 @@ def load_profile(profile_name, chat_id):
         session_data[chat_id]['CONVERSATION'] = []
         session_data[chat_id]['model_version'] = model
         session_data[chat_id]['profile_name'] = profile_name
+        print(f"Debug: Set profile_name to: {repr(profile_name)} for chat_id: {chat_id}")  # Debug output
         
         # Add system prompt as first message
         session_data[chat_id]['CONVERSATION'].append({
@@ -321,6 +322,9 @@ def get_reply(message, image_data_64, session_id):
             "model_version": "gpt-4o-mini",
             "max_rounds": DEFAULT_MAX_ROUNDS
         }
+    # Ensure session has all required keys without overwriting existing ones
+    if "profile_name" not in session_data[session_id]:
+        session_data[session_id]["profile_name"] = None
     has_image = False
     # check the length of the existing conversation, if it is too long (with messages more than double the max rounds, then trim off until it is within the limit of rounds. one round is one user and one assistant text.
     max_messages = session_data[session_id]["max_rounds"] * 2
@@ -896,7 +900,8 @@ def long_polling():
                 session_data[chat_id] = {'model_version': "gpt-4o-mini",
                                         'CONVERSATION': [],
                                         'tokens_used': 0,
-                                        "max_rounds": DEFAULT_MAX_ROUNDS
+                                        "max_rounds": DEFAULT_MAX_ROUNDS,
+                                        "profile_name": None
                                         }
 
         except Exception as e:
@@ -943,6 +948,7 @@ def long_polling():
 
                 # Show active profile
                 profile_name = session_data[chat_id].get('profile_name', None)
+                print(f"Debug: profile_name from session: {repr(profile_name)}")  # Debug output
                 if profile_name:
                     reply_text += f"Active profile: {profile_name.replace('.profile', '')}\n"
                 else:
