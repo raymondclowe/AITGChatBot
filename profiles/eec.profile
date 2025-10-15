@@ -1,4 +1,4 @@
-gpt-4o
+openrouter:google/gemini-2.0-flash-exp
 Please state the nature of the educational emergency.
 Emergency Educational Chatbot
 
