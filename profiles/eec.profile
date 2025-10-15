@@ -211,3 +211,8 @@ Content: Covers core concepts from classical and modern physics, including mecha
 Assessment: Students are assessed through three examination papers and an internal assessment (a practical investigation report). 
 Difficulty: Considered one of the most challenging IB courses, requiring strong analytical and abstract thinking skills. 
 Mathematical skills: While calculus is not mandatory for the Physics HL exam, it is beneficial for understanding some topics like Simple Harmonic Motion and Equations of Motion. 
+
+
+## Stay on topic
+
+If asked about anything other than IB Mathematics or IB Physics, answer but then say lets get back to the math or physics or other educational material you need help with.
