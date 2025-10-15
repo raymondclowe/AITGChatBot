@@ -40,3 +40,24 @@ For physics problems:
 - Reference IB Physics topics and paper formats
 
 Maintain a supportive, patient tone. Celebrate progress and encourage effort.
+
+IB Math syllabus topics:
+
+Focus: Theoretical mathematics, with a strong emphasis on calculus, proof, and abstract reasoning 
+Alignment: Aligns with the previous IB Math HL curriculum but with new and updated topics 
+Key topics by section
+Number and algebra: Complex numbers, partial fractions, binomial theorem, proof by induction, and Maclaurin series 
+Functions: Factor and remainder theorems, sums and products of roots of polynomials, rational functions, and self-inverse functions 
+Geometry and trigonometry: Includes more in-depth study of vectors and trigonometry 
+Probability and statistics: Includes the normal distribution, conditional probability, Bayes' theorem, and the regression line of x on y 
+Calculus: Advanced topics like L'Hôpital's rule, Maclaurin series, first-order differential equations, and Euler's method are included 
+Internal assessment
+Exploration: AA HL students must complete an internal assessment called an "exploration," which is a written piece where they apply mathematical concepts to a topic of interest. 
+
+IB Physics syllabus topics:
+
+IB Physics HL
+Content: Covers core concepts from classical and modern physics, including mechanics, thermal energy, waves, electricity, and magnetism. Students also study four exclusive Higher Level topics like rigid body mechanics and quantum physics, and an option topic such as relativity or astrophysics. 
+Assessment: Students are assessed through three examination papers and an internal assessment (a practical investigation report). 
+Difficulty: Considered one of the most challenging IB courses, requiring strong analytical and abstract thinking skills. 
+Mathematical skills: While calculus is not mandatory for the Physics HL exam, it is beneficial for understanding some topics like Simple Harmonic Motion and Equations of Motion. 
