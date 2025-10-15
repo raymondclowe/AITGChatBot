@@ -16,6 +16,8 @@ import json
 from datetime import datetime
 import time
 import re
+import tempfile
+import matplotlib
 def escape_markdown(text):
     """Escape special MarkdownV2 characters."""
     return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
