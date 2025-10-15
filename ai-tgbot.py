@@ -76,6 +76,82 @@ def clear_context(chat_id):
     session_data[chat_id]['CONVERSATION'] = []
 
 
+# Profile management constants and functions
+PROFILE_DIR = "./profiles"
+
+def is_valid_model(model_name):
+    """Validate that model name is supported."""
+    valid_prefixes = ['gpt-', 'claude-', 'llama', 'openrouter:']
+    return any(model_name.startswith(prefix) for prefix in valid_prefixes)
+
+
+def list_available_profiles():
+    """List all available profile files."""
+    if not os.path.exists(PROFILE_DIR):
+        os.makedirs(PROFILE_DIR)
+        return []
+    
+    profiles = []
+    for filename in os.listdir(PROFILE_DIR):
+        if filename.endswith('.profile'):
+            profiles.append(filename)
+    
+    return sorted(profiles)
+
+
+def load_profile(profile_name, chat_id):
+    """
+    Load a profile from file and apply it to the session.
+    
+    Args:
+        profile_name: Name of profile file (with or without .profile extension)
+        chat_id: Telegram chat ID to apply profile to
+    
+    Returns:
+        tuple: (success: bool, message: str, greeting: str)
+    """
+    # Ensure .profile extension
+    if not profile_name.endswith('.profile'):
+        profile_name += '.profile'
+    
+    profile_path = os.path.join(PROFILE_DIR, profile_name)
+    
+    if not os.path.exists(profile_path):
+        return False, f"Profile '{profile_name}' not found.", None
+    
+    try:
+        with open(profile_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        if len(lines) < 3:
+            return False, "Invalid profile format. Needs at least 3 lines.", None
+        
+        # Parse profile components
+        model = lines[0].strip()
+        greeting = lines[1].strip()
+        system_prompt = ''.join(lines[2:]).strip()
+        
+        # Validate model name
+        if not is_valid_model(model):
+            return False, f"Invalid model specified: {model}", None
+        
+        # Clear existing conversation and apply new profile
+        session_data[chat_id]['CONVERSATION'] = []
+        session_data[chat_id]['model_version'] = model
+        session_data[chat_id]['profile_name'] = profile_name
+        
+        # Add system prompt as first message
+        session_data[chat_id]['CONVERSATION'].append({
+            'role': 'system',
+            'content': [{'type': 'text', 'text': system_prompt}]
+        })
+        
+        return True, f"Profile '{profile_name}' activated successfully.", greeting
+        
+    except Exception as e:
+        return False, f"Error loading profile: {str(e)}", None
+
+
 def get_reply(message, image_data_64, session_id):
     note = ""
     response_text = ""
@@ -691,7 +767,12 @@ def long_polling():
                 reply_text += "• Send images with text to vision-capable models for analysis\n"
                 reply_text += "• Models with 📷 support image input (vision)\n"  
                 reply_text += "• Models with 🎨 support image output (generation)\n"
-                reply_text += "• OpenRouter models automatically support images when capable"
+                reply_text += "• OpenRouter models automatically support images when capable\n\n"
+                reply_text += "🎭 Profile Features:\n"
+                reply_text += "/activate <profile> - activate a profile\n"
+                reply_text += "/listprofiles - show all available profiles\n"
+                reply_text += "/currentprofile - show current active profile\n"
+                reply_text += "/deactivate - return to default configuration"
 
                 send_message(chat_id, reply_text)
                 continue  # Skip the rest of the processing loop
@@ -747,6 +828,64 @@ def long_polling():
                 reply_text = f"Context cleared"
                 send_message(chat_id, reply_text)
                 continue  # Skip the rest of the processing loop
+
+            # Handle profile activation
+            if message_text.startswith('/activate'):
+                parts = message_text.split(maxsplit=1)
+                
+                if len(parts) < 2:
+                    # List available profiles
+                    profiles = list_available_profiles()
+                    if profiles:
+                        reply = "Available profiles:\n"
+                        reply += "\n".join([f"• {p.replace('.profile', '')}" for p in profiles])
+                        reply += "\n\nUse: /activate <profile_name>"
+                    else:
+                        reply = "No profiles available."
+                    send_message(chat_id, reply)
+                    continue
+                
+                profile_name = parts[1]
+                success, message, greeting = load_profile(profile_name, chat_id)
+                
+                send_message(chat_id, message)
+                if success and greeting:
+                    send_message(chat_id, greeting)
+                continue
+
+            # Handle list profiles command
+            if message_text.startswith('/listprofiles'):
+                profiles = list_available_profiles()
+                if profiles:
+                    reply = "📋 Available profiles:\n\n"
+                    for p in profiles:
+                        profile_name = p.replace('.profile', '')
+                        reply += f"• {profile_name}\n"
+                    reply += "\nUse /activate <profile_name> to activate a profile"
+                else:
+                    reply = "No profiles available."
+                send_message(chat_id, reply)
+                continue
+
+            # Handle current profile command
+            if message_text.startswith('/currentprofile'):
+                profile_name = session_data[chat_id].get('profile_name', None)
+                if profile_name:
+                    reply = f"Current profile: {profile_name.replace('.profile', '')}\n"
+                    reply += f"Model: {session_data[chat_id]['model_version']}"
+                else:
+                    reply = "No profile activated. Using default configuration."
+                send_message(chat_id, reply)
+                continue
+
+            # Handle deactivate profile command
+            if message_text.startswith('/deactivate'):
+                session_data[chat_id]['CONVERSATION'] = []
+                session_data[chat_id]['model_version'] = "gpt-4o-mini"
+                session_data[chat_id]['profile_name'] = None
+                reply = "Profile deactivated. Returned to default configuration."
+                send_message(chat_id, reply)
+                continue
 
             # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
             if message_text.startswith('/listopenroutermodels'):
