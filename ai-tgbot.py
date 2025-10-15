@@ -940,7 +940,14 @@ def long_polling():
                 current_model = session_data[chat_id]['model_version']
                 reply_text = f"Model: {current_model}\n"
                 reply_text += f"Provider: {session_data[chat_id].get('provider', 'Not set')}\n"
-                
+
+                # Show active profile
+                profile_name = session_data[chat_id].get('profile_name', None)
+                if profile_name:
+                    reply_text += f"Active profile: {profile_name.replace('.profile', '')}\n"
+                else:
+                    reply_text += "Active profile: None (default)\n"
+
                 # Show image capabilities for OpenRouter models
                 if current_model.startswith("openrouter:"):
                     model_id = current_model[11:]  # Remove "openrouter:" prefix
@@ -953,7 +960,7 @@ def long_polling():
                     reply_text += "Image capabilities: 📷 Image input (vision)\n"
                 else:
                     reply_text += "Image capabilities: None\n"
-                
+
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
                 reply_text += f"Chatbot version: {version}\n"
