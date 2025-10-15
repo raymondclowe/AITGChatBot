@@ -255,18 +255,74 @@ def send_photo_to_telegram(chat_id, image_path, caption=None):
         return False
 
 
+def convert_inline_latex_to_telegram(text):
+    """
+    Convert inline LaTeX expressions to Telegram formatting.
+    Converts \( variable \) to _variable_ (italic formatting).
+    
+    Args:
+        text: Text containing inline LaTeX expressions
+        
+    Returns:
+        str: Text with LaTeX expressions converted to Telegram formatting
+    """
+    # Pattern to match inline LaTeX expressions like \( ... \)
+    # This handles both \( ... \) and \\( ... \\) patterns  
+    inline_latex_pattern = r'\\+\(\s*(.*?)\s*\\+\)'
+    
+    def replace_inline_math(match):
+        content = match.group(1).strip()
+        
+        # For simple variable names (single letters or common math variables)
+        # convert to italic formatting
+        if re.match(r'^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+)*$', content):
+            return f'_{content}_'
+        
+        # For more complex expressions, try to identify individual variables
+        # and format them appropriately
+        formatted_content = content
+        
+        # Handle simple mathematical expressions
+        # Replace isolated single letters/variables that are likely mathematical variables
+        var_pattern = r'\b([a-zA-Z](?:[a-zA-Z0-9]*)?)\b'
+        
+        def format_variable(var_match):
+            var_name = var_match.group(1)
+            # Don't format common English words that might appear in math contexts
+            common_words = {'a', 'an', 'the', 'is', 'are', 'and', 'or', 'of', 'in', 'to', 'for', 'with', 'by', 'at', 'on', 'as', 'if', 'it'}
+            if var_name.lower() in common_words and len(var_name) > 1:
+                return var_name
+            return f'_{var_name}_'
+        
+        formatted_content = re.sub(var_pattern, format_variable, formatted_content)
+        
+        # Clean up any double formatting that might have occurred
+        formatted_content = re.sub(r'_(_[^_]+_)_', r'\1', formatted_content)
+        
+        return formatted_content
+    
+    # Apply the conversion
+    converted_text = re.sub(inline_latex_pattern, replace_inline_math, text)
+    
+    return converted_text
+
+
 def process_ai_response(response_text, chat_id):
     """
     Process AI response, extract LaTeX, render to images, and send messages.
+    Also converts inline LaTeX expressions to Telegram formatting.
     
     Args:
         response_text: The text response from the AI
         chat_id: Telegram chat ID to send messages to
     """
+    # First convert inline LaTeX expressions to Telegram formatting
+    response_text = convert_inline_latex_to_telegram(response_text)
+    
     latex_blocks = detect_latex_blocks(response_text)
     
     if not latex_blocks:
-        # No LaTeX, send as normal text
+        # No block LaTeX, send as normal text (inline LaTeX already converted)
         send_message(chat_id, response_text)
         return
     

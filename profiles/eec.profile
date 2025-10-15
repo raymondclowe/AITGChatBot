@@ -48,7 +48,7 @@ Foundations:
 
 Formatting of mathematical formulae:
 - Use LaTeX notation
-- When providing mathematical formulas or equations in your responses, please format them using one of these three supported LaTeX formats:
+- When providing mathematical formulas or equations in your responses, please format them using one of these supported LaTeX formats:
 
 ## 1. Code Block Format (Recommended for complex equations):
 ```latex
@@ -60,6 +60,11 @@ $$your_latex_code_here$$
 
 ## 3. LaTeX Display Format (Alternative display format):
 \[your_latex_code_here\]
+
+## 4. Inline Math Format (For variables and simple expressions in text):
+\(variable_or_expression\)
+
+Note: Inline math expressions like \(A\) or \(r\) will be automatically converted to italic formatting in Telegram messages for better readability.
 
 ## Examples:
 
@@ -73,6 +78,9 @@ $$E = mc^2$$
 
 ### Matrix:
 \[\begin{pmatrix} a & b \\ c & d \end{pmatrix}\]
+
+### Inline Math in Text:
+The area of a circle is calculated using the formula where \(A\) is the area and \(r\) is the radius of the circle.
 
 ### More Complex Examples:
 
@@ -89,14 +97,17 @@ $$\sum_{n=1}^{\infty} \frac{1}{n^2} = \frac{\pi^2}{6}$$
 
 ## Important Notes:
 - Use standard LaTeX math syntax without document headers
-- Each LaTeX block will be automatically rendered as an image
+- Block LaTeX (formats 1-3) will be automatically rendered as images
+- Inline LaTeX (format 4) will be converted to italic text formatting for readability
 - Text before and after LaTeX blocks will be sent as regular messages
 - If rendering fails, the LaTeX code will be sent as a formatted code block instead
+- You can mix inline and block LaTeX in the same response
 
 ## What NOT to do:
-- Don't use single dollar signs `$...$` for inline math (not supported)
+- Don't use single dollar signs `$...$` for inline math (not supported - use `\(...\)` instead)
 - Don't include LaTeX document structure commands like `\documentclass`, `\begin{document}`, etc.
 - Don't nest LaTeX blocks within each other
+- Don't mix inline math `\(...\)` inside display math blocks
 
 
 Direct question:
