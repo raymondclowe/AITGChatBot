@@ -216,6 +216,49 @@ def test_latex_integration():
                 pass
 
 
+def test_convert_inline_latex_to_telegram():
+    """Test inline LaTeX conversion to Telegram formatting."""
+    
+    # Import the function from the main file
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    # Read and execute the function from the main file
+    with open('ai-tgbot.py', 'r') as f:
+        content = f.read()
+    
+    # Extract the function
+    start = content.find('def convert_inline_latex_to_telegram')
+    end = content.find('\n\ndef ', start + 1)
+    if end == -1:
+        end = len(content)
+    func_code = content[start:end]
+    
+    # Execute the function in global scope
+    exec(func_code, globals())
+    
+    # Test cases
+    test_cases = [
+        (r'The area \(A\) of a circle', 'The area *A* of a circle'),
+        (r'The value of \(\pi\) is approximately 3.14', 'The value of π is approximately 3\\.14'),
+        (r'Solve for \(x\) in the equation', 'Solve for *x* in the equation'),
+        (r'Using \(F = ma\)', 'Using *F* \\= *ma*'),
+        (r'Greek letters: \(\alpha + \beta = \gamma\)', 'Greek letters: α \\+ β \\= γ'),
+    ]
+    
+    for input_text, expected in test_cases:
+        result = convert_inline_latex_to_telegram(input_text)
+        if result != expected:
+            print(f"FAIL: Input: {input_text}")
+            print(f"Expected: {expected}")
+            print(f"Got: {result}")
+            return False
+    
+    print("✓ Inline LaTeX conversion tests passed")
+    return True
+
+
 def run_tests():
     """Run all tests."""
     print("\n=== Testing LaTeX Support System ===\n")
@@ -224,6 +267,7 @@ def run_tests():
         test_detect_latex_blocks,
         test_render_latex_to_image,
         test_latex_integration,
+        test_convert_inline_latex_to_telegram,
     ]
     
     failed = 0
