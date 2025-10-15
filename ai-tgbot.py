@@ -276,7 +276,7 @@ def convert_inline_latex_to_telegram(text):
         # For simple variable names (single letters or common math variables)
         # convert to italic formatting
         if re.match(r'^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+)*$', content):
-            return f'_{content}_'
+            return f'__{content}__'  # Double underscores for underline in Telegram
         
         # For more complex expressions, try to identify individual variables
         # and format them appropriately
