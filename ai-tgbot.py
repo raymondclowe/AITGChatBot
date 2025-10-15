@@ -147,8 +147,8 @@ def load_profile(profile_name, chat_id):
         # Clear existing conversation and apply new profile
         session_data[chat_id]['CONVERSATION'] = []
         session_data[chat_id]['model_version'] = model
-    session_data[chat_id]['profile_name'] = profile_name
-    session_data[chat_id]['personality_name'] = personality_name
+        session_data[chat_id]['profile_name'] = profile_name
+        session_data[chat_id]['personality_name'] = personality_name
         print(f"Debug: Set profile_name to: {repr(profile_name)} for chat_id: {chat_id}")  # Debug output
         
         # Add system prompt as first message
@@ -157,8 +157,8 @@ def load_profile(profile_name, chat_id):
             'content': [{'type': 'text', 'text': system_prompt}]
         })
         
-    activation_message = f"Activating {personality_name} ({profile_name})"
-    return True, activation_message, greeting
+        activation_message = f"Activating {personality_name} ({profile_name})"
+        return True, activation_message, greeting
         
     except Exception as e:
         return False, f"Error loading profile: {str(e)}", None
