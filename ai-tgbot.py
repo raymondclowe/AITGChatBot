@@ -1,4 +1,4 @@
-version = "1.6.0"
+version = "1.7.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -7,6 +7,7 @@ version = "1.6.0"
 # 1.4.0 - gpt4o-mini support and becomes the default
 # 1.5.0 - openrouter buttons
 # 1.6.0 - image in and out
+# 1.7.0 - profile system and LaTeX support
 
 import requests
 import base64
@@ -14,6 +15,14 @@ import os
 import json
 from datetime import datetime
 import time
+import re
+import tempfile
+import matplotlib
+def escape_markdown(text):
+    """Escape special MarkdownV2 characters."""
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
 
 # Get the API keys from the environment variables
 API_KEY = os.environ.get('API_KEY')
@@ -76,6 +85,330 @@ def clear_context(chat_id):
     session_data[chat_id]['CONVERSATION'] = []
 
 
+# Profile management constants and functions
+PROFILE_DIR = "./profiles"
+
+def is_valid_model(model_name):
+    """Validate that model name is supported."""
+    valid_prefixes = ['gpt-', 'claude-', 'llama', 'openrouter:']
+    return any(model_name.startswith(prefix) for prefix in valid_prefixes)
+
+
+def list_available_profiles():
+    """List all available profile files."""
+    if not os.path.exists(PROFILE_DIR):
+        os.makedirs(PROFILE_DIR)
+        return []
+    
+    profiles = []
+    for filename in os.listdir(PROFILE_DIR):
+        if filename.endswith('.profile'):
+            profiles.append(filename)
+    
+    return sorted(profiles)
+
+
+def load_profile(profile_name, chat_id):
+    """
+    Load a profile from file and apply it to the session.
+    
+    Args:
+        profile_name: Name of profile file (with or without .profile extension)
+        chat_id: Telegram chat ID to apply profile to
+    
+    Returns:
+        tuple: (success: bool, message: str, greeting: str)
+    """
+    # Ensure .profile extension
+    if not profile_name.endswith('.profile'):
+        profile_name += '.profile'
+    
+    profile_path = os.path.join(PROFILE_DIR, profile_name)
+    
+    if not os.path.exists(profile_path):
+        return False, f"Profile '{profile_name}' not found.", None
+    
+    try:
+        with open(profile_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        if len(lines) < 3:
+            return False, "Invalid profile format. Needs at least 3 lines (model, greeting, personality).", None
+        
+        # Parse profile components
+        model = lines[0].strip()
+        greeting = lines[1].strip()
+        personality_name = lines[2].strip()
+        if not personality_name:
+            personality_name = profile_name.replace('.profile', '')
+        system_prompt = ''.join(lines[3:]).strip()
+        
+        # Validate model name
+        if not is_valid_model(model):
+            return False, f"Invalid model specified: {model}", None
+        
+        # Clear existing conversation and apply new profile
+        session_data[chat_id]['CONVERSATION'] = []
+        session_data[chat_id]['model_version'] = model
+        session_data[chat_id]['profile_name'] = profile_name
+        session_data[chat_id]['personality_name'] = personality_name
+        print(f"Debug: Set profile_name to: {repr(profile_name)} for chat_id: {chat_id}")  # Debug output
+        
+        # Add system prompt as first message
+        session_data[chat_id]['CONVERSATION'].append({
+            'role': 'system',
+            'content': [{'type': 'text', 'text': system_prompt}]
+        })
+
+        activation_message = f"Activating *{personality_name}* ({profile_name})"
+        return True, activation_message, greeting
+        
+    except Exception as e:
+        return False, f"Error loading profile: {str(e)}", None
+
+
+# LaTeX rendering functions
+def detect_latex_blocks(text):
+    """
+    Detect LaTeX blocks in text using multiple patterns.
+    Returns list of dicts with 'start', 'end', 'content', 'full_match' keys.
+    """
+    patterns = [
+        r'```latex\s*\n(.*?)\n\s*```',  # Code block format with optional whitespace
+        r'\$\$(.*?)\$\$',                # Display math format
+        r'\\\[(.*?)\\\]',                # LaTeX display format
+    ]
+    
+    latex_blocks = []
+    for pattern in patterns:
+        matches = re.finditer(pattern, text, re.DOTALL)
+        for match in matches:
+            latex_blocks.append({
+                'start': match.start(),
+                'end': match.end(),
+                'content': match.group(1).strip(),
+                'full_match': match.group(0)
+            })
+    
+    # Sort by position and remove duplicates
+    latex_blocks.sort(key=lambda x: x['start'])
+    
+    # Remove overlapping blocks (keep first occurrence)
+    filtered_blocks = []
+    last_end = -1
+    for block in latex_blocks:
+        if block['start'] >= last_end:
+            filtered_blocks.append(block)
+            last_end = block['end']
+    
+    return filtered_blocks
+
+
+def render_latex_to_image(latex_code, output_path):
+    """
+    Render LaTeX code to an image using matplotlib.
+    
+    Args:
+        latex_code: LaTeX expression to render
+        output_path: Path to save the PNG image
+    
+    Returns:
+        bool: True if rendering succeeded, False otherwise
+    """
+    try:
+        # Create figure with very dark grey background for dark mode
+        fig = plt.figure(figsize=(10, 2))
+        fig.patch.set_facecolor('#111111')
+        
+        # Render LaTeX with white text
+        text = fig.text(0.5, 0.5, f'${latex_code}$', 
+                       horizontalalignment='center',
+                       verticalalignment='center',
+                       fontsize=8, color='white')
+        
+        # Save with tight bounding box
+        plt.savefig(output_path, bbox_inches='tight', 
+                   pad_inches=0.1, facecolor='#111111', dpi=150)
+        plt.close(fig)
+        
+        return True
+        
+    except Exception as e:
+        print(f"LaTeX rendering failed: {e}")
+        try:
+            plt.close('all')
+        except:
+            pass
+        return False
+
+
+def send_photo_to_telegram(chat_id, image_path, caption=None):
+    """Send a photo file to Telegram."""
+    try:
+        with open(image_path, 'rb') as photo:
+            files = {'photo': photo}
+            data = {'chat_id': chat_id}
+            if caption:
+                data['caption'] = caption
+            
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_KEY}/sendPhoto",
+                files=files,
+                data=data
+            )
+            
+            return response.ok
+    except Exception as e:
+        print(f"Error sending photo: {e}")
+        return False
+
+
+def convert_inline_latex_to_telegram(text):
+    """Convert inline LaTeX expressions to Telegram MarkdownV2 formatting."""
+    inline_latex_pattern = r'\\+\(\s*(.*?)\s*\\+\)'
+    
+    # Greek letters and common symbols mapping
+    greek_letters = {
+        'alpha': 'α', 'beta': 'β', 'gamma': 'γ', 'delta': 'δ', 'epsilon': 'ε',
+        'zeta': 'ζ', 'eta': 'η', 'theta': 'θ', 'iota': 'ι', 'kappa': 'κ',
+        'lambda': 'λ', 'mu': 'μ', 'nu': 'ν', 'xi': 'ξ', 'omicron': 'ο',
+        'pi': 'π', 'rho': 'ρ', 'sigma': 'σ', 'tau': 'τ', 'upsilon': 'υ',
+        'phi': 'φ', 'chi': 'χ', 'psi': 'ψ', 'omega': 'ω',
+        'Alpha': 'Α', 'Beta': 'Β', 'Gamma': 'Γ', 'Delta': 'Δ', 'Epsilon': 'Ε',
+        'Zeta': 'Ζ', 'Eta': 'Η', 'Theta': 'Θ', 'Iota': 'Ι', 'Kappa': 'Κ',
+        'Lambda': 'Λ', 'Mu': 'Μ', 'Nu': 'Ν', 'Xi': 'Ξ', 'Omicron': 'Ο',
+        'Pi': 'Π', 'Rho': 'Ρ', 'Sigma': 'Σ', 'Tau': 'Τ', 'Upsilon': 'Υ',
+        'Phi': 'Φ', 'Chi': 'Χ', 'Psi': 'Ψ', 'Omega': 'Ω'
+    }
+    
+    # Common mathematical operators and symbols
+    math_symbols = {
+        'times': '×', 'div': '÷', 'pm': '±', 'mp': '∓', 'cdot': '⋅',
+        'leq': '≤', 'geq': '≥', 'neq': '≠', 'approx': '≈', 'equiv': '≡',
+        'subset': '⊂', 'supset': '⊃', 'subseteq': '⊆', 'supseteq': '⊇',
+        'in': '∈', 'notin': '∉', 'forall': '∀', 'exists': '∃', 'nabla': '∇',
+        'partial': '∂', 'infty': '∞', 'sum': '∑', 'prod': '∏', 'int': '∫',
+        'oint': '∮', 'sqrt': '√', 'propto': '∝', 'perp': '⊥', 'parallel': '∥',
+        'angle': '∠', 'triangle': '△', 'square': '□', 'diamond': '◇'
+    }
+
+    def escape_markdown(text):
+        """Escape special MarkdownV2 characters."""
+        return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+
+    def convert_latex_content(content):
+        """Convert LaTeX content to Telegram-compatible formatting."""
+        # Handle Greek letters
+        for latex_name, unicode_symbol in greek_letters.items():
+            content = re.sub(r'\\' + latex_name + r'\b', unicode_symbol, content)
+        
+        # Handle common mathematical symbols
+        for latex_name, unicode_symbol in math_symbols.items():
+            content = re.sub(r'\\' + latex_name + r'\b', unicode_symbol, content)
+        
+        # Handle fractions (simple case)
+        content = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'\1/\2', content)
+        
+        # Handle superscripts and subscripts (simple cases) - convert to plain text for now
+        content = re.sub(r'_(\w+)', r'\1', content)  # Remove subscripts
+        content = re.sub(r'\^(\w+)', r'\1', content)  # Remove superscripts
+        
+        # For now, italicize remaining variables (single letters or simple names)
+        # Split by operators and spaces, italicize alphabetic parts
+        parts = re.split(r'(\W+)', content)
+        result_parts = []
+        for part in parts:
+            if re.match(r'^[a-zA-Z]+$', part) and len(part) <= 3:  # Short variable names
+                result_parts.append(f'*{part}*')
+            else:
+                result_parts.append(part)
+        
+        return ''.join(result_parts)
+
+    result = []
+    last_end = 0
+
+    for match in re.finditer(inline_latex_pattern, text):
+        # Append the text before the inline LaTeX expression
+        result.append(text[last_end:match.start()])
+
+        content = match.group(1).strip()
+        converted = convert_latex_content(content)
+        result.append(converted)
+
+        last_end = match.end()
+
+    # Append any remaining text after the last match
+    result.append(text[last_end:])
+
+    return ''.join(result)
+
+
+def process_ai_response(response_text, chat_id):
+    """
+    Process AI response, extract LaTeX, render to images, and send messages.
+    Also converts inline LaTeX expressions to Telegram formatting.
+    
+    Args:
+        response_text: The text response from the AI
+        chat_id: Telegram chat ID to send messages to
+    """
+    latex_blocks = detect_latex_blocks(response_text)
+
+    if not latex_blocks:
+        formatted_text = convert_inline_latex_to_telegram(response_text)
+        send_message(chat_id, formatted_text, parse_mode="Markdown")
+        return
+    
+    # Split text around LaTeX blocks and send sequentially
+    last_pos = 0
+
+    for i, block in enumerate(latex_blocks):
+        # Send text before this LaTeX block
+        if block['start'] > last_pos:
+            text_before_raw = response_text[last_pos:block['start']]
+            if text_before_raw.strip():
+                formatted_text = convert_inline_latex_to_telegram(text_before_raw)
+                if formatted_text:
+                    send_message(chat_id, formatted_text, parse_mode="Markdown")
+        
+        # Render and send LaTeX as image
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            image_path = tmp.name
+        
+        try:
+            if render_latex_to_image(block['content'], image_path):
+                # Send the image
+                if send_photo_to_telegram(chat_id, image_path):
+                    print(f"Successfully sent LaTeX image for block {i}")
+                else:
+                    # Fallback: send as code block if image sending fails
+                    escaped_content = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', block['content'])
+                    fallback_message = f"```latex\n{escaped_content}\n```"
+                    send_message(chat_id, fallback_message, parse_mode="Markdown")
+            else:
+                # Fallback: send as code block if rendering fails
+                escaped_content = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', block['content'])
+                fallback_message = f"```latex\n{escaped_content}\n```"
+                send_message(chat_id, fallback_message, parse_mode="Markdown")
+        finally:
+            # Clean up temp file
+            try:
+                os.remove(image_path)
+            except:
+                pass
+        
+        last_pos = block['end']
+    
+    # Send any remaining text after last LaTeX block
+    if last_pos < len(response_text):
+        text_after_raw = response_text[last_pos:]
+        if text_after_raw.strip():
+            formatted_text = convert_inline_latex_to_telegram(text_after_raw)
+            if formatted_text:
+                send_message(chat_id, formatted_text, parse_mode="Markdown")
+
+
 def get_reply(message, image_data_64, session_id):
     note = ""
     response_text = ""
@@ -84,8 +417,14 @@ def get_reply(message, image_data_64, session_id):
             "CONVERSATION": [],
             "tokens_used": 0,
             "model_version": "gpt-4o-mini",
-            "max_rounds": DEFAULT_MAX_ROUNDS
+            "max_rounds": DEFAULT_MAX_ROUNDS,
+            "personality_name": None
         }
+    # Ensure session has all required keys without overwriting existing ones
+    if "profile_name" not in session_data[session_id]:
+        session_data[session_id]["profile_name"] = None
+    if "personality_name" not in session_data[session_id]:
+        session_data[session_id]["personality_name"] = None
     has_image = False
     # check the length of the existing conversation, if it is too long (with messages more than double the max rounds, then trim off until it is within the limit of rounds. one round is one user and one assistant text.
     max_messages = session_data[session_id]["max_rounds"] * 2
@@ -631,7 +970,7 @@ def long_polling():
                     full_msg = f"{base_msg}\n{capability_msg}"
                 else:
                     full_msg = base_msg
-                send_message(chat_id, full_msg)
+                send_message(chat_id, escape_markdown(full_msg), parse_mode="MarkdownV2")
                 
                 # Acknowledge the callback query
                 requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
@@ -661,7 +1000,9 @@ def long_polling():
                 session_data[chat_id] = {'model_version': "gpt-4o-mini",
                                         'CONVERSATION': [],
                                         'tokens_used': 0,
-                                        "max_rounds": DEFAULT_MAX_ROUNDS
+                                        "max_rounds": DEFAULT_MAX_ROUNDS,
+                                        "profile_name": None,
+                                        "personality_name": None
                                         }
 
         except Exception as e:
@@ -691,16 +1032,32 @@ def long_polling():
                 reply_text += "• Send images with text to vision-capable models for analysis\n"
                 reply_text += "• Models with 📷 support image input (vision)\n"  
                 reply_text += "• Models with 🎨 support image output (generation)\n"
-                reply_text += "• OpenRouter models automatically support images when capable"
+                reply_text += "• OpenRouter models automatically support images when capable\n\n"
+                reply_text += "🎭 Profile Features:\n"
+                reply_text += "/activate <profile> - activate a profile\n"
+                reply_text += "/listprofiles - show all available profiles\n"
+                reply_text += "/currentprofile - show current active profile\n"
+                reply_text += "/deactivate - return to default configuration"
 
-                send_message(chat_id, reply_text)
+                send_message(chat_id, reply_text, parse_mode="Markdown")
                 continue  # Skip the rest of the processing loop
 
             if message_text.startswith('/status'):
                 current_model = session_data[chat_id]['model_version']
                 reply_text = f"Model: {current_model}\n"
                 reply_text += f"Provider: {session_data[chat_id].get('provider', 'Not set')}\n"
-                
+
+                # Show active profile
+                profile_name = session_data[chat_id].get('profile_name', None)
+                personality_name = session_data[chat_id].get('personality_name', None)
+                print(f"Debug: profile_name from session: {repr(profile_name)}")  # Debug output
+                if profile_name and personality_name:
+                    reply_text += f"Active profile: {profile_name} ({personality_name})\n"
+                elif profile_name:
+                    reply_text += f"Active profile: {profile_name}\n"
+                else:
+                    reply_text += "Active profile: None (default)\n"
+
                 # Show image capabilities for OpenRouter models
                 if current_model.startswith("openrouter:"):
                     model_id = current_model[11:]  # Remove "openrouter:" prefix
@@ -713,17 +1070,17 @@ def long_polling():
                     reply_text += "Image capabilities: 📷 Image input (vision)\n"
                 else:
                     reply_text += "Image capabilities: None\n"
-                
+
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
                 reply_text += f"Chatbot version: {version}\n"
-                send_message(chat_id, reply_text)
+                send_message(chat_id, reply_text, parse_mode="Markdown")
                 continue
 
             if message_text.startswith('/maxrounds'):
                 if len(message_text.split()) == 1:
                     reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
-                    send_message(chat_id, reply_text)
+                    send_message(chat_id, reply_text, parse_mode="Markdown")
                     continue
 
                 max_rounds = DEFAULT_MAX_ROUNDS
@@ -738,31 +1095,94 @@ def long_polling():
                 
                 session_data[chat_id]['max_rounds'] = max_rounds
                 reply_text = f"Max rounds set to {max_rounds}"
-                send_message(chat_id, reply_text)
+                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                 continue  
 
             # Check for command to clear context
             if message_text.startswith('/clear'):
                 clear_context(chat_id)
                 reply_text = f"Context cleared"
-                send_message(chat_id, reply_text)
+                send_message(chat_id, reply_text, parse_mode="Markdown")
                 continue  # Skip the rest of the processing loop
+
+            # Handle profile activation
+            if message_text.startswith('/activate'):
+                parts = message_text.split(maxsplit=1)
+                
+                if len(parts) < 2:
+                    # List available profiles
+                    profiles = list_available_profiles()
+                    if profiles:
+                        reply = "Available profiles:\n"
+                        reply += "\n".join([f"• {p.replace('.profile', '')}" for p in profiles])
+                        reply += "\n\nUse: /activate <profile_name>"
+                    else:
+                        reply = "No profiles available."
+                    send_message(chat_id, reply, parse_mode="Markdown")
+                    continue
+                
+                profile_name = parts[1]
+                success, message, greeting = load_profile(profile_name, chat_id)
+                
+                send_message(chat_id, message, parse_mode="Markdown")
+                if success and greeting:
+                    send_message(chat_id, greeting, parse_mode="Markdown")
+                continue
+
+            # Handle list profiles command
+            if message_text.startswith('/listprofiles'):
+                profiles = list_available_profiles()
+                if profiles:
+                    reply = "📋 Available profiles:\n\n"
+                    for p in profiles:
+                        profile_name = p.replace('.profile', '')
+                        reply += f"• {profile_name}\n"
+                    reply += "\nUse /activate <profile_name> to activate a profile"
+                else:
+                    reply = "No profiles available."
+                send_message(chat_id, escape_markdown(reply), parse_mode="MarkdownV2")
+                continue
+
+            # Handle current profile command
+            if message_text.startswith('/currentprofile'):
+                profile_name = session_data[chat_id].get('profile_name', None)
+                personality_name = session_data[chat_id].get('personality_name', None)
+                if profile_name:
+                    if personality_name:
+                        reply = f"Current profile: {profile_name} ({personality_name})\n"
+                    else:
+                        reply = f"Current profile: {profile_name}\n"
+                    reply += f"Model: {session_data[chat_id]['model_version']}"
+                else:
+                    reply = "No profile activated. Using default configuration."
+                send_message(chat_id, escape_markdown(reply), parse_mode="MarkdownV2")
+                continue
+
+            # Handle deactivate profile command
+            if message_text.startswith('/deactivate'):
+                session_data[chat_id]['CONVERSATION'] = []
+                session_data[chat_id]['model_version'] = "gpt-4o-mini"
+                session_data[chat_id]['profile_name'] = None
+                session_data[chat_id]['personality_name'] = None
+                reply = "Profile deactivated. Returned to default configuration."
+                send_message(chat_id, escape_markdown(reply), parse_mode="MarkdownV2")
+                continue
 
             # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
             if message_text.startswith('/listopenroutermodels'):
                 reply_text = list_openrouter_models_as_message()
-                send_message(chat_id, reply_text)
+                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                 continue  # Skip the rest of the processing loop
                 
             # Handle /openrouter command in long_polling
             if message_text.startswith("/openrouter"):
                 if len(message_text.split()) == 1:
-                    send_message(chat_id, "Please specify a model name after the command")
+                    send_message(chat_id, "Please specify a model name after the command", parse_mode="Markdown")
                     continue
                 model_substring = message_text.split()[1]
                 matching_models = get_matching_models(model_substring)
                 if len(matching_models) == 0:
-                    send_message(chat_id, f"Model name {model_substring} not found in list of models")
+                    send_message(chat_id, f"Model name {model_substring} not found in list of models", parse_mode="Markdown")
                     continue
                 elif len(matching_models) == 1:
                     model_id = matching_models[0]
@@ -776,20 +1196,20 @@ def long_polling():
                         full_msg = f"{base_msg}\n{capability_msg}"
                     else:
                         full_msg = base_msg
-                    send_message(chat_id, full_msg)
+                    send_message(chat_id, full_msg, parse_mode="Markdown")
                     continue
                 else:
                     keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
                     reply_markup = {'inline_keyboard': keyboard}
                     # print(f'Keybord {keyboard}')
-                    send_message(chat_id, "Multiple models found, please select one:", reply_markup=reply_markup)
+                    send_message(chat_id, escape_markdown("Multiple models found, please select one:"), reply_markup=reply_markup, parse_mode="MarkdownV2")
                     continue
 
             # Check for other commands to switch models (excluding /openrouter here)
             elif message_text.startswith("/gpt3") or message_text.startswith("/gpt4") or message_text.startswith("/claud3") or message_text.startswith("/llama3"):
                 update_model_version(chat_id, message_text)
                 reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
-                send_message(chat_id, reply_text)
+                send_message(chat_id, reply_text, parse_mode="Markdown")
                 continue
 
 
@@ -845,25 +1265,30 @@ def long_polling():
         try:            
            # Get reply from OpenAI and send it back to the user
             reply_text, tokens_used = get_reply(message_text, image_data_base64, chat_id)
-            send_message(chat_id, reply_text )
+            # Process response for LaTeX and send
+            process_ai_response(reply_text, chat_id)
 
         except Exception as e:
             print(f"Error getting reply  on line {e.__traceback__.tb_lineno}: {e}")
             continue
 
 # Send a message to user
-def send_message(chat_id, text, reply_markup=None):
+def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     print(f'send_message to {chat_id} text length {len(text)} ')
     print(f'text {text[:50]}...')  # print first 50 characters of text
     print(f'reply_markup {reply_markup} ')
     MAX_LENGTH = 4096
-    def send_partial_message(chat_id, partial_text, reply_markup=None):        
+    use_parse_mode = parse_mode if parse_mode and len(text) <= MAX_LENGTH else None
+
+    def send_partial_message(chat_id, partial_text, reply_markup=None, parse_mode=None):        
         message_data = {
             "chat_id": chat_id,
             "text": partial_text
         }
         if reply_markup:
             message_data["reply_markup"] = reply_markup
+        if parse_mode:
+            message_data["parse_mode"] = parse_mode
         print(f'message_data {message_data} ')
     #    print(message_data)
         response = requests.post(f"https://api.telegram.org/bot{BOT_KEY}/sendMessage", json=message_data)
@@ -876,7 +1301,7 @@ def send_message(chat_id, text, reply_markup=None):
     while text:
         # If the text is shorter than the maximum, send it as is
         if len(text) <= MAX_LENGTH:
-            send_partial_message(chat_id, text, reply_markup=reply_markup)
+            send_partial_message(chat_id, text, reply_markup=reply_markup, parse_mode=use_parse_mode)
             break
         # If the text is too long, split it into smaller parts
         else:
@@ -886,7 +1311,7 @@ def send_message(chat_id, text, reply_markup=None):
             if split_at == -1:
                 split_at = MAX_LENGTH
             # Send the first part and shorten the remaining text
-            send_partial_message(chat_id, text[:split_at], reply_markup=reply_markup)
+            send_partial_message(chat_id, text[:split_at], reply_markup=reply_markup, parse_mode=use_parse_mode)
             text = text[split_at:]
 
 
@@ -940,7 +1365,7 @@ def send_image_to_telegram(chat_id, image_data, mime_type):
     except Exception as e:
         print(f"Exception sending image: {e}")
         # Send text message as fallback
-        send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed.")
+        send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed.", parse_mode="Markdown")
 
 
 long_polling()
