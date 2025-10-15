@@ -4,7 +4,7 @@
 ## 1. LaTeX Support for Math Formulas
 
 ### Overview
-Enable the chatbot to detect, parse, and render mathematical formulas written in LaTeX notation, providing visual output for complex equations.
+Enable the chatbot to detect, parse, and render mathematical formulas written in LaTeX notation, providing visual output for complex equations, when the system prompt has included instructions to use LaTeX and deliniate it properly with triple backticks (markdown style) or <latex> </latex> (xml style), and always on separate paragraphs, never inline.
 
 ### Features
 
@@ -64,42 +64,6 @@ import tempfile
 import os
 from PIL import Image
 
-def render_latex_to_image(latex_code, output_path, dpi=300):
-    """
-    Render LaTeX code to PNG image using matplotlib or external tools.
-    
-    Args:
-        latex_code: The LaTeX mathematical expression
-        output_path: Where to save the rendered image
-        dpi: Resolution of the output image
-    
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        # Method 1: Using matplotlib (simpler, included in requirements)
-        import matplotlib.pyplot as plt
-        import matplotlib as mpl
-        
-        mpl.rcParams['mathtext.fontset'] = 'cm'
-        mpl.rcParams['mathtext.rm'] = 'serif'
-        
-        fig = plt.figure(figsize=(10, 2))
-        fig.patch.set_facecolor('white')
-        text = fig.text(0.5, 0.5, f'${latex_code}$', 
-                       fontsize=20, ha='center', va='center')
-        
-        # Adjust figure size to fit text
-        fig.savefig(output_path, dpi=dpi, bbox_inches='tight', 
-                   pad_inches=0.1, facecolor='white')
-        plt.close(fig)
-        return True
-        
-    except Exception as e:
-        print(f"Error rendering LaTeX: {e}")
-        return False
-
-# Alternative Method 2: Using LaTeX and dvipng (more powerful but requires system LaTeX)
 def render_latex_advanced(latex_code, output_path):
     """
     Render using actual LaTeX engine (requires latex and dvipng installed).
@@ -200,8 +164,7 @@ def process_ai_response(response_text, chat_id):
    - Use restricted LaTeX mode or sandbox the rendering process
    - Blacklist dangerous commands: `\input`, `\write`, `\immediate`, `\openout`
 
-4. **System Dependencies:**
-   - matplotlib method: Only requires Python packages (simpler)
+4. **System Dependencies:**   
    - Advanced method: Requires LaTeX distribution (`texlive`, `dvipng`)
    - Document installation requirements clearly
    - Provide graceful degradation if dependencies missing
@@ -213,7 +176,7 @@ def process_ai_response(response_text, chat_id):
    - Set proper MIME types when sending images
 
 6. **User Experience:**
-   - Show "Rendering equation..." status while processing
+   
    - Include original LaTeX as image caption for reference
    - Handle multiple equations in single message correctly
    - Preserve message order (text before, image, text after)
@@ -226,21 +189,11 @@ def process_ai_response(response_text, chat_id):
 
 ### Required Dependencies
 
-Add to `requirements.txt`:
-```
-matplotlib>=3.5.0
-Pillow>=9.0.0
-numpy>=1.21.0
-```
 
-Optional for advanced rendering:
+
+
 ```bash
 # Ubuntu/Debian
-sudo apt-get install texlive texlive-latex-extra dvipng
-
-# MacOS
-brew install --cask mactex
-brew install dvipng
 ```
 
 ### Testing Strategy
@@ -617,44 +570,9 @@ Automatically select the optimal AI model based on specified constraints and req
 
 ### Implementation Details
 
-**Constraint File Format (`.ai` files):**
-
-`tutor.ai`:
-```json
-{
-  "constraints": {
-    "capabilities": {
-      "image_input": true,
-      "context_length_min": 8000
-    },
-    "cost": {
-      "max_prompt_cost": 0.10,
-      "max_completion_cost": 0.30,
-      "currency": "USD_per_1M_tokens"
-    },
-    "performance": {
-      "min_tokens_per_second": 50
-    },
-    "quality": {
-      "sort_by": "popularity",
-      "min_context_length": 8000
-    }
-  },
-  "preferences": {
-    "provider_preference": ["anthropic", "openai", "google"],
-    "model_preference": ["claude", "gpt-4"],
-    "avoid_models": ["gpt-3.5-turbo"]
-  },
-  "fallback": {
-    "model": "gpt-4o-mini",
-    "on_error": "use_default"
-  }
-}
-```
-
 **Simpler YAML Format Alternative:**
 
-`pirate.ai`:
+`pirate.yaml`:
 ```yaml
 # AI Model Constraints for Pirate Profile
 capabilities:
@@ -1367,9 +1285,9 @@ def send_ai_response_chunked(chat_id, response_text):
    - Log costs for billing/monitoring
 
 2. **Generation Time:**
-   - TTS can take 5-30 seconds depending on text length
-   - Show "recording audio" status to user
-   - Consider async processing for long texts
+   - TTS can take 5-30 seconds depending on text length - choose fast models, fast wins over good
+   
+   - Consider async processing for long texts, do first paragraph and speak that while generating the remainder
    - Implement timeout (60 seconds max)
 
 3. **Audio File Management:**
@@ -1379,16 +1297,13 @@ def send_ai_response_chunked(chat_id, response_text):
    - Consider streaming instead of file download
 
 4. **Language Support:**
-   - Different TTS models support different languages
+   - Different TTS models support different languages; only English is required.  Good to have: Cantonese, Mandarin, French and Spanish 
    - Validate language codes before sending to API
    - Provide clear error messages for unsupported languages
-   - Auto-detect language from response text (optional)
+   
 
 5. **Voice Quality:**
-   - Different voices have different characteristics
-   - Allow users to test voices before selecting
-   - Provide voice samples or previews
-   - Consider voice cloning for custom personas
+   - Speed over quality
 
 6. **Rate Limiting:**
    - Replicate has rate limits
@@ -1398,21 +1313,21 @@ def send_ai_response_chunked(chat_id, response_text):
 
 7. **Telegram Limitations:**
    - Voice messages limited to 50MB
+   - Split message text into smaller pieces to avoid voice messages becoming too large
    - Audio duration affects file size
-   - Consider compression for long audio
-   - Fallback to text if audio too large
+   - Fall back to splitting text into smaller chunks.
+   
 
 8. **Accessibility:**
    - TTS is critical for visually impaired users
    - Never force TTS-only mode without user choice
-   - Provide clear controls for enabling/disabling
-   - Test with screen readers
+
 
 9. **Content Filtering:**
    - Some TTS models refuse certain content
    - Handle rejection gracefully
    - Provide fallback to text
-   - Don't expose raw API errors to users
+   - DO expose raw API errors to users if there is a problem
 
 ### Required Dependencies
 
@@ -1731,52 +1646,45 @@ def convert_audio_format(input_path: str, output_path: str,
 1. **Transcription Accuracy:**
    - Accuracy depends on audio quality, accent, background noise
    - Provide user feedback when confidence is low
-   - Allow users to correct transcription
+   - Prompt user to retry and discard bad quality recording if confidence is low
    - Consider showing confidence scores
 
 2. **Audio Quality:**
    - Telegram voice messages are compressed (OGG/OPUS)
    - Background noise significantly impacts accuracy
-   - Short messages (<2 seconds) may not transcribe well
-   - Consider audio preprocessing (noise reduction)
+   - Short messages (<2 seconds) may not transcribe well, prompt the user to speak clearly and in full sentences
+   
 
 3. **Language Detection:**
-   - Whisper auto-detects language but can be wrong
-   - Allow users to specify language hint
+   - Whisper auto-detects language but can be wrong; weight it heavily to presume English by default
    - Show detected language to user
-   - Handle code-switching (multiple languages in one message)
 
 4. **API Costs & Speed:**
    - Whisper is relatively fast (2-10 seconds for 1 minute audio)
    - Cost is ~$0.006 per minute
-   - Consider caching transcriptions
    - Implement rate limiting for voice messages
 
 5. **Privacy Concerns:**
    - Voice data is sent to external API (Replicate/OpenAI)
-   - Inform users in privacy policy
-   - Don't log or store voice data unnecessarily
-   - Comply with GDPR and data protection laws
 
 6. **File Size Limits:**
    - Telegram limits voice messages to 20MB
    - Long messages may hit Whisper limits (25MB)
-   - Implement file size checks before processing
+   - Implement file size checks before processing by splitting into sections with small (3 second) overlaps
    - Provide clear error messages
 
 7. **Multimodal Models:**
-   - Some models (GPT-4o Audio) support direct audio input
+   - Some models (check openrouter model list) support direct audio input
    - Skip transcription if model supports native audio
    - Preserve audio nuances (tone, emotion) when possible
    - Check model capabilities before transcription
 
 8. **User Experience:**
-   - Always show transcription before processing
-   - Allow users to cancel/edit transcription
-   - Provide visual feedback during processing
    - Handle network errors gracefully
+   - User speaks into voice memo, sends, then soon gets a voice or text response.
+   - Text of users speach is NOT shown
 
-9. **Edge Cases:**
+10. **Edge Cases:**
    - Empty/silent audio files
    - Non-speech audio (music, noise)
    - Multiple speakers
@@ -1885,8 +1793,8 @@ Example phrases:
 - "By Blackbeard's beard, that's a tricky one!"
 ```
 
-**Pirate Constraints (`pirate.ai`):**
-```json
+**Pirate Constraints (`pirate.yaml`):**
+```json -> convert to yaml
 {
   "constraints": {
     "cost": {
@@ -1950,8 +1858,8 @@ For physics problems:
 Maintain a supportive, patient tone. Celebrate progress and encourage effort.
 ```
 
-**Tutor Constraints (`tutor_ib.ai`):**
-```json
+**Tutor Constraints (`tutor_ib.yaml`):**
+```json - >  convert to yaml
 {
   "constraints": {
     "capabilities": {
@@ -1976,313 +1884,18 @@ Maintain a supportive, patient tone. Celebrate progress and encourage effort.
 }
 ```
 
-**3. Code Review Assistant (`code_reviewer.profile`):**
-```
-openrouter:anthropic/claude-3.5-sonnet
-Hi! I'm your code review assistant. Share your code and I'll provide constructive feedback on quality, security, performance, and best practices. 💻
-You are an expert code reviewer with deep knowledge of multiple programming languages, design patterns, and software engineering best practices.
-
-Your review approach:
-- Constructive and educational (not just critical)
-- Focus on correctness, readability, maintainability, performance, security
-- Suggest specific improvements with examples
-- Explain the "why" behind recommendations
-- Prioritize issues (critical, important, minor, nitpick)
-- Acknowledge good practices when present
-
-Areas to examine:
-1. **Correctness**: Logic errors, edge cases, potential bugs
-2. **Security**: SQL injection, XSS, authentication issues, sensitive data handling
-3. **Performance**: Inefficient algorithms, unnecessary operations, memory usage
-4. **Readability**: Clear naming, comments, code organization
-5. **Maintainability**: DRY principle, modularity, coupling/cohesion
-6. **Best Practices**: Language idioms, design patterns, error handling
-7. **Testing**: Test coverage, testability, edge cases
-
-Format your reviews:
-```
-## Summary
-Brief overview of code quality
-
-## Critical Issues (🔴)
-[Issues that must be fixed]
-
-## Important Improvements (🟡)
-[Significant improvements to consider]
-
-## Minor Suggestions (🔵)
-[Nice-to-have improvements]
-
-## What's Done Well (✅)
-[Positive feedback]
-
-## Example Refactoring
-[Show improved version if major changes suggested]
-```
-
-Be specific, provide examples, and always be respectful.
-```
-
-**4. Creative Writing Assistant (`writer.profile`):**
-```
-openrouter:anthropic/claude-3-opus
-Hello! I'm your creative writing companion. Whether you need help brainstorming, drafting, or editing, I'm here to help bring your stories to life! ✍️
-You are a creative writing assistant helping authors, screenwriters, and storytellers develop compelling narratives.
-
-Your role:
-- Brainstorm ideas for characters, plots, settings, themes
-- Provide feedback on story structure, pacing, character development
-- Suggest improvements for dialogue, descriptions, and prose style
-- Help overcome writer's block
-- Offer constructive critique on drafts
-- Discuss narrative techniques and literary devices
-
-When helping with writing:
-1. **Brainstorming**: Ask questions to understand the writer's vision, offer diverse ideas
-2. **Character Development**: Explore motivations, backstory, arcs, relationships
-3. **Plot Structure**: Discuss setup, conflict, climax, resolution; identify pacing issues
-4. **Prose Style**: Comment on voice, tone, word choice, rhythm
-5. **Dialogue**: Ensure it sounds natural and reveals character
-6. **Show vs Tell**: Encourage sensory details and subtext
-7. **Themes**: Help identify and strengthen thematic elements
-
-Provide feedback that:
-- Balances praise with constructive criticism
-- Offers specific suggestions with examples
-- Respects the author's voice and vision
-- Asks questions to clarify intent
-- Considers genre conventions and audience
-
-For creative exercises:
-- Offer writing prompts
-- Suggest character or scene-building exercises
-- Provide examples from literature when helpful
-
-Be encouraging and supportive while maintaining high standards.
-```
-
-**5. Technical Documentation Assistant (`tech_docs.profile`):**
-```
-gpt-4o
-Hello! I'm specialized in creating clear, comprehensive technical documentation. Let's make your documentation user-friendly and effective! 📖
-You are a technical documentation specialist helping create clear, accurate, and user-friendly documentation for software, APIs, and technical products.
-
-Your expertise includes:
-- API documentation (REST, GraphQL, etc.)
-- User guides and tutorials
-- README files and getting started guides
-- Architecture documentation
-- Code comments and inline documentation
-- Release notes and changelogs
-
-Documentation principles:
-1. **Clarity**: Use simple language, avoid jargon, define terms
-2. **Completeness**: Cover all necessary information
-3. **Accuracy**: Ensure technical correctness
-4. **Organization**: Logical structure, easy navigation
-5. **Examples**: Provide code samples and use cases
-6. **Accessibility**: Consider diverse audiences and skill levels
-
-When helping with documentation:
-
-For API docs:
-- Clear endpoint descriptions
-- Request/response examples
-- Error codes and handling
-- Authentication details
-- Rate limits and constraints
-
-For user guides:
-- Step-by-step instructions
-- Screenshots or diagrams (descriptions)
-- Common pitfalls and troubleshooting
-- Prerequisites and requirements
-
-For code documentation:
-- Clear function/method descriptions
-- Parameter explanations
-- Return value documentation
-- Usage examples
-- Edge cases and limitations
-
-Best practices:
-- Use active voice
-- Include real-world examples
-- Maintain consistent formatting
-- Version documentation appropriately
-- Consider SEO for discoverability
-
-Always verify technical accuracy and suggest improvements for clarity.
-```
 
 ### Profile Creation Script
 
-```python
-#!/usr/bin/env python3
-"""
-Script to create example profiles.
-Run: python create_example_profiles.py
-"""
+- Manually create example profiles using create file tool
 
-import os
-
-PROFILES_DIR = "./profiles"
-
-profiles = {
-    "pirate.profile": """gpt-4o-mini
-Ahoy there, matey! I be Captain ChatBot, ready to help ye navigate the seven seas of knowledge! What treasure of information be ye seeking today? ⚓🏴‍☠️
-You are Captain ChatBot, a jovial pirate who speaks in traditional pirate slang. 
-
-Your personality:
-- Use pirate terminology: "ahoy", "matey", "arr", "ye", "aye", "shiver me timbers"
-- Refer to yourself as a captain or old sea dog
-- Make nautical references when explaining things
-- Be enthusiastic and theatrical
-- End many sentences with "Arr!" or similar pirate exclamations
-- Use maritime metaphors (e.g., "let's set sail on this problem", "anchor down this concept")
-
-Despite the pirate persona, you still:
-- Provide accurate, helpful information
-- Give clear, understandable explanations
-- Take questions seriously (while staying in character)
-- Are respectful and friendly
-
-Example phrases:
-- "That be a fine question, matey!"
-- "Let me chart a course through this problem fer ye"
-- "Arr! Here be the treasure ye seek"
-- "By Blackbeard's beard, that's a tricky one!"
-""",
-
-    "tutor_ib.profile": """openrouter:anthropic/claude-3-opus
-Hello! I'm your IB Math and Physics tutor. I'm here to help you understand concepts deeply, not just memorize formulas. What would you like to work on today? 📚
-You are an experienced International Baccalaureate (IB) tutor specializing in IB Math and IB Physics.
-
-Your teaching philosophy:
-- Socratic method: Ask guiding questions rather than giving direct answers
-- Conceptual understanding over memorization
-- Connect topics to real-world applications
-- Identify and address misconceptions
-- Build on student's existing knowledge
-- Encourage mathematical reasoning and critical thinking
-
-When helping students:
-1. First assess their current understanding
-2. Break complex problems into manageable steps
-3. Use analogies and visual descriptions
-4. Relate concepts to IB exam expectations
-5. Provide practice problems similar to IB questions
-6. Highlight common mistakes and how to avoid them
-7. Reference IB command terms (define, explain, derive, etc.)
-
-Maintain a supportive, patient tone. Celebrate progress and encourage effort.
-""",
-}
-
-def create_profiles():
-    """Create example profile files."""
-    os.makedirs(PROFILES_DIR, exist_ok=True)
-    
-    for filename, content in profiles.items():
-        filepath = os.path.join(PROFILES_DIR, filename)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f"✅ Created {filename}")
-
-if __name__ == "__main__":
-    create_profiles()
-    print(f"\n🎉 Example profiles created in {PROFILES_DIR}/")
-    print("Use /activate <profile_name> to load them!")
-```
-
-### Watch Points & Considerations
-
-1. **Profile Maintenance:**
-   - Profiles may become outdated as models evolve
-   - Review and update prompts regularly
-   - Test profiles periodically to ensure quality
-   - Version control profile files
-
-2. **System Prompt Effectiveness:**
-   - Different models respond differently to same prompt
-   - Test profiles with multiple models
-   - Adjust prompt style for model capabilities
-   - Some models ignore system prompts better than others
-
-3. **User Expectations:**
-   - Clear profile descriptions prevent confusion
-   - Preview profiles before full activation
-   - Allow easy switching without losing context
-   - Provide examples of profile behavior
-
-4. **Profile Discovery:**
-   - Make profiles easy to find and understand
-   - Provide categories (educational, entertainment, professional)
-   - Include usage examples in descriptions
-   - Consider profile ratings/reviews
-
-5. **Educational Use Cases:**
-   - Ensure tutor profiles encourage learning, not cheating
-   - Balance guidance with independent thinking
-   - Don't just give answers to homework
-   - Align with educational standards
-
-6. **Character Consistency:**
-   - Profiles should maintain personality throughout conversation
-   - Test with various types of questions
-   - Handle edge cases (e.g., pirate discussing serious topics)
-   - Balance character with functionality
-
-7. **Constraint Files:**
-   - Keep constraints reasonable and achievable
-   - Test that constraints actually match available models
-   - Update constraints as model landscape changes
-   - Provide fallbacks for all profiles
-
-8. **Content Safety:**
-   - Profile prompts should not override safety guidelines
-   - Monitor for inappropriate profile usage
-   - Implement content filtering regardless of profile
-   - Review user-created profiles if allowed
-
-### Testing Example Profiles
-
-```python
-def test_profiles():
-    """Test example profiles."""
-    test_cases = {
-        'pirate': [
-            ("What is 2+2?", "pirate language", "arr or matey"),
-            ("Explain Python", "nautical metaphors", "sea references"),
-        ],
-        'tutor_ib': [
-            ("What is calculus?", "socratic questions", "asking about understanding"),
-            ("Solve x^2 = 4", "guiding steps", "not direct answer"),
-        ],
-    }
-    
-    for profile, tests in test_cases.items():
-        print(f"\nTesting {profile} profile:")
-        # Load profile
-        success, msg, greeting = load_profile(profile, 'test_chat')
-        assert success, f"Failed to load {profile}"
-        
-        # Test each case
-        for question, should_contain, description in tests:
-            response = get_reply(question, None, 'test_chat')
-            # Check response matches expected style
-            print(f"  Q: {question}")
-            print(f"  A: {response[:100]}...")
-            print(f"  ✓ Contains {description}")
-```
-
----
+- 
 
 # Next Steps
 
 ## Detailed Implementation Plan
 
-### Phase 1: Foundation (Weeks 1-2)
+### Phase 1: Foundation 
 
 **Week 1: Profile System**
 - [ ] Create profiles directory structure
@@ -2304,7 +1917,7 @@ def test_profiles():
 - [ ] Test with various LaTeX expressions
 - [ ] Optimize image generation performance
 
-### Phase 2: Advanced Features (Weeks 3-4)
+### Phase 2: Advanced Features 
 
 **Week 3: Dynamic Model Selection**
 - [ ] Design constraint file format (JSON)
@@ -2327,7 +1940,7 @@ def test_profiles():
 - [ ] Add audio file cleanup
 - [ ] Test with various text lengths and languages
 
-### Phase 3: Audio & Polish (Weeks 5-6)
+### Phase 3: Audio & Polish 
 
 **Week 5: Audio Features (Part 2 - STT)**
 - [ ] Implement STTManager class
@@ -2350,7 +1963,7 @@ def test_profiles():
 - [ ] Create installation guide
 - [ ] Write developer documentation
 
-### Phase 4: Deployment & Monitoring (Week 7)
+### Phase 4: Deployment & Monitoring
 
 **Week 7: Production Readiness**
 - [ ] Set up logging and monitoring
@@ -2437,21 +2050,6 @@ AITGChatBot/
    - Provide usage examples
    - Explain complex algorithms
 
-### Monitoring & Maintenance
-
-**Metrics to Track:**
-- API call counts and costs
-- Error rates by feature
-- Response times
-- User engagement (commands used)
-- Profile activation frequency
-- TTS/STT usage statistics
-
-**Regular Maintenance:**
-- Weekly: Review error logs
-- Monthly: Update dependencies
-- Quarterly: Review and update profiles
-- Annually: Security audit
 
 ### Success Criteria
 
@@ -2463,22 +2061,4 @@ Each feature is considered complete when:
 - [ ] No critical bugs
 - [ ] Performance acceptable
 - [ ] User feedback positive
-
-### Risk Mitigation
-
-**Technical Risks:**
-- API changes → Use versioned APIs, monitor announcements
-- Rate limits → Implement caching, queue requests
-- Cost overruns → Set budget alerts, implement usage caps
-- Performance issues → Profile code, optimize hot paths
-
-**User Risks:**
-- Confusion → Clear documentation, intuitive commands
-- Misuse → Content filtering, rate limiting, monitoring
-- Data loss → Regular backups, error recovery
-
-**External Dependencies:**
-- OpenRouter changes → Regular testing, fallback options
-- Replicate changes → Monitor API, version lock
-- Telegram API changes → Follow changelog, test updates
 
