@@ -130,12 +130,15 @@ def load_profile(profile_name, chat_id):
             lines = f.readlines()
         
         if len(lines) < 3:
-            return False, "Invalid profile format. Needs at least 3 lines.", None
+            return False, "Invalid profile format. Needs at least 3 lines (model, greeting, personality).", None
         
         # Parse profile components
         model = lines[0].strip()
         greeting = lines[1].strip()
-        system_prompt = ''.join(lines[2:]).strip()
+        personality_name = lines[2].strip()
+        if not personality_name:
+            personality_name = profile_name.replace('.profile', '')
+        system_prompt = ''.join(lines[3:]).strip()
         
         # Validate model name
         if not is_valid_model(model):
@@ -144,7 +147,8 @@ def load_profile(profile_name, chat_id):
         # Clear existing conversation and apply new profile
         session_data[chat_id]['CONVERSATION'] = []
         session_data[chat_id]['model_version'] = model
-        session_data[chat_id]['profile_name'] = profile_name
+    session_data[chat_id]['profile_name'] = profile_name
+    session_data[chat_id]['personality_name'] = personality_name
         print(f"Debug: Set profile_name to: {repr(profile_name)} for chat_id: {chat_id}")  # Debug output
         
         # Add system prompt as first message
@@ -153,7 +157,8 @@ def load_profile(profile_name, chat_id):
             'content': [{'type': 'text', 'text': system_prompt}]
         })
         
-        return True, f"Profile '{profile_name}' activated successfully.", greeting
+    activation_message = f"Activating {personality_name} ({profile_name})"
+    return True, activation_message, greeting
         
     except Exception as e:
         return False, f"Error loading profile: {str(e)}", None
@@ -376,11 +381,14 @@ def get_reply(message, image_data_64, session_id):
             "CONVERSATION": [],
             "tokens_used": 0,
             "model_version": "gpt-4o-mini",
-            "max_rounds": DEFAULT_MAX_ROUNDS
+            "max_rounds": DEFAULT_MAX_ROUNDS,
+            "personality_name": None
         }
     # Ensure session has all required keys without overwriting existing ones
     if "profile_name" not in session_data[session_id]:
         session_data[session_id]["profile_name"] = None
+    if "personality_name" not in session_data[session_id]:
+        session_data[session_id]["personality_name"] = None
     has_image = False
     # check the length of the existing conversation, if it is too long (with messages more than double the max rounds, then trim off until it is within the limit of rounds. one round is one user and one assistant text.
     max_messages = session_data[session_id]["max_rounds"] * 2
@@ -957,7 +965,8 @@ def long_polling():
                                         'CONVERSATION': [],
                                         'tokens_used': 0,
                                         "max_rounds": DEFAULT_MAX_ROUNDS,
-                                        "profile_name": None
+                                        "profile_name": None,
+                                        "personality_name": None
                                         }
 
         except Exception as e:
@@ -1004,9 +1013,12 @@ def long_polling():
 
                 # Show active profile
                 profile_name = session_data[chat_id].get('profile_name', None)
+                personality_name = session_data[chat_id].get('personality_name', None)
                 print(f"Debug: profile_name from session: {repr(profile_name)}")  # Debug output
-                if profile_name:
-                    reply_text += f"Active profile: {profile_name.replace('.profile', '')}\n"
+                if profile_name and personality_name:
+                    reply_text += f"Active profile: {profile_name} ({personality_name})\n"
+                elif profile_name:
+                    reply_text += f"Active profile: {profile_name}\n"
                 else:
                     reply_text += "Active profile: None (default)\n"
 
@@ -1098,8 +1110,12 @@ def long_polling():
             # Handle current profile command
             if message_text.startswith('/currentprofile'):
                 profile_name = session_data[chat_id].get('profile_name', None)
+                personality_name = session_data[chat_id].get('personality_name', None)
                 if profile_name:
-                    reply = f"Current profile: {profile_name.replace('.profile', '')}\n"
+                    if personality_name:
+                        reply = f"Current profile: {profile_name} ({personality_name})\n"
+                    else:
+                        reply = f"Current profile: {profile_name}\n"
                     reply += f"Model: {session_data[chat_id]['model_version']}"
                 else:
                     reply = "No profile activated. Using default configuration."
@@ -1111,6 +1127,7 @@ def long_polling():
                 session_data[chat_id]['CONVERSATION'] = []
                 session_data[chat_id]['model_version'] = "gpt-4o-mini"
                 session_data[chat_id]['profile_name'] = None
+                session_data[chat_id]['personality_name'] = None
                 reply = "Profile deactivated. Returned to default configuration."
                 send_message(chat_id, reply)
                 continue
