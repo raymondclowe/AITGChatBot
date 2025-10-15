@@ -17,6 +17,7 @@ from datetime import datetime
 import time
 import re
 import tempfile
+from html import escape
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
@@ -156,8 +157,8 @@ def load_profile(profile_name, chat_id):
             'role': 'system',
             'content': [{'type': 'text', 'text': system_prompt}]
         })
-        
-        activation_message = f"Activating {personality_name} ({profile_name})"
+
+        activation_message = f"Activating **{personality_name}** ({profile_name})"
         return True, activation_message, greeting
         
     except Exception as e:
@@ -261,55 +262,57 @@ def send_photo_to_telegram(chat_id, image_path, caption=None):
 
 
 def convert_inline_latex_to_telegram(text):
-    """
-    Convert inline LaTeX expressions to Telegram formatting.
-    Converts \( variable \) to _variable_ (italic formatting).
-    
-    Args:
-        text: Text containing inline LaTeX expressions
-        
-    Returns:
-        str: Text with LaTeX expressions converted to Telegram formatting
-    """
-    # Pattern to match inline LaTeX expressions like \( ... \)
-    # This handles both \( ... \) and \\( ... \\) patterns  
+    """Convert inline LaTeX expressions to Telegram HTML formatting."""
     inline_latex_pattern = r'\\+\(\s*(.*?)\s*\\+\)'
-    
-    def replace_inline_math(match):
+    simple_var_pattern = r'^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+)*$'
+    var_pattern = re.compile(r'\b([a-zA-Z](?:[a-zA-Z0-9]*)?)\b')
+    common_words = {
+        'a', 'an', 'the', 'is', 'are', 'and', 'or', 'of', 'in', 'to', 'for',
+        'with', 'by', 'at', 'on', 'as', 'if', 'it'
+    }
+
+    result = []
+    last_end = 0
+
+    for match in re.finditer(inline_latex_pattern, text):
+        # Append the text before the inline LaTeX expression, HTML-escaped
+        result.append(escape(text[last_end:match.start()]))
+
         content = match.group(1).strip()
-        
-        # For simple variable names (single letters or common math variables)
-        # convert to italic formatting
-        if re.match(r'^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+)*$', content):
-            return f'__{content}__'  # Double underscores for underline in Telegram
-        
-        # For more complex expressions, try to identify individual variables
-        # and format them appropriately
-        formatted_content = content
-        
-        # Handle simple mathematical expressions
-        # Replace isolated single letters/variables that are likely mathematical variables
-        var_pattern = r'\b([a-zA-Z](?:[a-zA-Z0-9]*)?)\b'
-        
-        def format_variable(var_match):
-            var_name = var_match.group(1)
-            # Don't format common English words that might appear in math contexts
-            common_words = {'a', 'an', 'the', 'is', 'are', 'and', 'or', 'of', 'in', 'to', 'for', 'with', 'by', 'at', 'on', 'as', 'if', 'it'}
-            if var_name.lower() in common_words and len(var_name) > 1:
-                return var_name
-            return f'_{var_name}_'
-        
-        formatted_content = re.sub(var_pattern, format_variable, formatted_content)
-        
-        # Clean up any double formatting that might have occurred
-        formatted_content = re.sub(r'_(_[^_]+_)_', r'\1', formatted_content)
-        
-        return formatted_content
-    
-    # Apply the conversion
-    converted_text = re.sub(inline_latex_pattern, replace_inline_math, text)
-    
-    return converted_text
+
+        if re.match(simple_var_pattern, content):
+            # Simple variable name -> underline
+            result.append(f'<u>{escape(content)}</u>')
+        else:
+            formatted_parts = []
+            sub_last = 0
+            for var_match in var_pattern.finditer(content):
+                # Add text before the variable, escaped
+                if var_match.start() > sub_last:
+                    formatted_parts.append(escape(content[sub_last:var_match.start()]))
+
+                var_name = var_match.group(1)
+                if var_name.lower() in common_words and len(var_name) > 1:
+                    formatted_parts.append(escape(var_name))
+                else:
+                    formatted_parts.append(f'<i>{escape(var_name)}</i>')
+
+                sub_last = var_match.end()
+
+            if sub_last < len(content):
+                formatted_parts.append(escape(content[sub_last:]))
+
+            if formatted_parts:
+                result.append(''.join(formatted_parts))
+            else:
+                result.append(escape(content))
+
+        last_end = match.end()
+
+    # Append any remaining text after the last match
+    result.append(escape(text[last_end:]))
+
+    return ''.join(result)
 
 
 def process_ai_response(response_text, chat_id):
@@ -321,25 +324,24 @@ def process_ai_response(response_text, chat_id):
         response_text: The text response from the AI
         chat_id: Telegram chat ID to send messages to
     """
-    # First convert inline LaTeX expressions to Telegram formatting
-    response_text = convert_inline_latex_to_telegram(response_text)
-    
     latex_blocks = detect_latex_blocks(response_text)
-    
+
     if not latex_blocks:
-        # No block LaTeX, send as normal text (inline LaTeX already converted)
-        send_message(chat_id, response_text)
+        formatted_text = convert_inline_latex_to_telegram(response_text)
+        send_message(chat_id, formatted_text, parse_mode="HTML")
         return
     
     # Split text around LaTeX blocks and send sequentially
     last_pos = 0
-    
+
     for i, block in enumerate(latex_blocks):
         # Send text before this LaTeX block
         if block['start'] > last_pos:
-            text_before = response_text[last_pos:block['start']].strip()
-            if text_before:
-                send_message(chat_id, text_before)
+            text_before_raw = response_text[last_pos:block['start']]
+            if text_before_raw.strip():
+                formatted_text = convert_inline_latex_to_telegram(text_before_raw)
+                if formatted_text:
+                    send_message(chat_id, formatted_text, parse_mode="HTML")
         
         # Render and send LaTeX as image
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
@@ -353,10 +355,14 @@ def process_ai_response(response_text, chat_id):
                     print(f"Successfully sent LaTeX image for block {i}")
                 else:
                     # Fallback: send as code block if image sending fails
-                    send_message(chat_id, f"```latex\n{block['content']}\n```")
+                    escaped_content = escape(block['content'])
+                    fallback_message = f"<pre language=\"latex\">{escaped_content}</pre>"
+                    send_message(chat_id, fallback_message, parse_mode="HTML")
             else:
                 # Fallback: send as code block if rendering fails
-                send_message(chat_id, f"```latex\n{block['content']}\n```")
+                escaped_content = escape(block['content'])
+                fallback_message = f"<pre language=\"latex\">{escaped_content}</pre>"
+                send_message(chat_id, fallback_message, parse_mode="HTML")
         finally:
             # Clean up temp file
             try:
@@ -368,9 +374,11 @@ def process_ai_response(response_text, chat_id):
     
     # Send any remaining text after last LaTeX block
     if last_pos < len(response_text):
-        text_after = response_text[last_pos:].strip()
-        if text_after:
-            send_message(chat_id, text_after)
+        text_after_raw = response_text[last_pos:]
+        if text_after_raw.strip():
+            formatted_text = convert_inline_latex_to_telegram(text_after_raw)
+            if formatted_text:
+                send_message(chat_id, formatted_text, parse_mode="HTML")
 
 
 def get_reply(message, image_data_64, session_id):
@@ -1237,18 +1245,22 @@ def long_polling():
             continue
 
 # Send a message to user
-def send_message(chat_id, text, reply_markup=None):
+def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     print(f'send_message to {chat_id} text length {len(text)} ')
     print(f'text {text[:50]}...')  # print first 50 characters of text
     print(f'reply_markup {reply_markup} ')
     MAX_LENGTH = 4096
-    def send_partial_message(chat_id, partial_text, reply_markup=None):        
+    use_parse_mode = parse_mode if parse_mode and len(text) <= MAX_LENGTH else None
+
+    def send_partial_message(chat_id, partial_text, reply_markup=None, parse_mode=None):        
         message_data = {
             "chat_id": chat_id,
             "text": partial_text
         }
         if reply_markup:
             message_data["reply_markup"] = reply_markup
+        if parse_mode:
+            message_data["parse_mode"] = parse_mode
         print(f'message_data {message_data} ')
     #    print(message_data)
         response = requests.post(f"https://api.telegram.org/bot{BOT_KEY}/sendMessage", json=message_data)
@@ -1261,7 +1273,7 @@ def send_message(chat_id, text, reply_markup=None):
     while text:
         # If the text is shorter than the maximum, send it as is
         if len(text) <= MAX_LENGTH:
-            send_partial_message(chat_id, text, reply_markup=reply_markup)
+            send_partial_message(chat_id, text, reply_markup=reply_markup, parse_mode=use_parse_mode)
             break
         # If the text is too long, split it into smaller parts
         else:
