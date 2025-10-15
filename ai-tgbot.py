@@ -214,19 +214,19 @@ def render_latex_to_image(latex_code, output_path):
         bool: True if rendering succeeded, False otherwise
     """
     try:
-        # Create figure with transparent background
+        # Create figure with black background for dark mode
         fig = plt.figure(figsize=(10, 2))
-        fig.patch.set_alpha(0.0)
+        fig.patch.set_facecolor('black')
         
-        # Render LaTeX
+        # Render LaTeX with white text
         text = fig.text(0.5, 0.5, f'${latex_code}$', 
                        horizontalalignment='center',
                        verticalalignment='center',
-                       fontsize=20)
+                       fontsize=10, color='white')
         
         # Save with tight bounding box
         plt.savefig(output_path, bbox_inches='tight', 
-                   pad_inches=0.1, transparent=True, dpi=150)
+                   pad_inches=0.1, facecolor='black', dpi=150)
         plt.close(fig)
         
         return True
@@ -350,7 +350,7 @@ def process_ai_response(response_text, chat_id):
         try:
             if render_latex_to_image(block['content'], image_path):
                 # Send the image
-                caption = f"LaTeX: {block['content'][:100]}" if len(block['content']) <= 100 else f"LaTeX: {block['content'][:97]}..."
+                caption = "LaTeX"
                 if send_photo_to_telegram(chat_id, image_path, caption):
                     print(f"Successfully sent LaTeX image for block {i}")
                 else:
