@@ -16,9 +16,9 @@ import json
 from datetime import datetime
 import time
 import re
-import tempfile
-from html import escape
-import matplotlib
+def escape_markdown(text):
+    """Escape special MarkdownV2 characters."""
+    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 
@@ -158,7 +158,7 @@ def load_profile(profile_name, chat_id):
             'content': [{'type': 'text', 'text': system_prompt}]
         })
 
-        activation_message = f"Activating **{personality_name}** ({profile_name})"
+        activation_message = f"Activating *{personality_name}* ({profile_name})"
         return True, activation_message, greeting
         
     except Exception as e:
@@ -214,9 +214,9 @@ def render_latex_to_image(latex_code, output_path):
         bool: True if rendering succeeded, False otherwise
     """
     try:
-        # Create figure with black background for dark mode
+        # Create figure with very dark grey background for dark mode
         fig = plt.figure(figsize=(10, 2))
-        fig.patch.set_facecolor('black')
+        fig.patch.set_facecolor('#111111')
         
         # Render LaTeX with white text
         text = fig.text(0.5, 0.5, f'${latex_code}$', 
@@ -226,7 +226,7 @@ def render_latex_to_image(latex_code, output_path):
         
         # Save with tight bounding box
         plt.savefig(output_path, bbox_inches='tight', 
-                   pad_inches=0.1, facecolor='black', dpi=150)
+                   pad_inches=0.1, facecolor='#111111', dpi=150)
         plt.close(fig)
         
         return True
@@ -262,7 +262,7 @@ def send_photo_to_telegram(chat_id, image_path, caption=None):
 
 
 def convert_inline_latex_to_telegram(text):
-    """Convert inline LaTeX expressions to Telegram HTML formatting."""
+    """Convert inline LaTeX expressions to Telegram MarkdownV2 formatting."""
     inline_latex_pattern = r'\\+\(\s*(.*?)\s*\\+\)'
     simple_var_pattern = r'^[a-zA-Z][a-zA-Z0-9]*(_[a-zA-Z0-9]+)*$'
     var_pattern = re.compile(r'\b([a-zA-Z](?:[a-zA-Z0-9]*)?)\b')
@@ -271,46 +271,50 @@ def convert_inline_latex_to_telegram(text):
         'with', 'by', 'at', 'on', 'as', 'if', 'it'
     }
 
+    def escape_markdown(text):
+        """Escape special MarkdownV2 characters."""
+        return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', text)
+
     result = []
     last_end = 0
 
     for match in re.finditer(inline_latex_pattern, text):
-        # Append the text before the inline LaTeX expression, HTML-escaped
-        result.append(escape(text[last_end:match.start()]))
+        # Append the text before the inline LaTeX expression, Markdown-escaped
+        result.append(escape_markdown(text[last_end:match.start()]))
 
         content = match.group(1).strip()
 
         if re.match(simple_var_pattern, content):
             # Simple variable name -> underline
-            result.append(f'<u>{escape(content)}</u>')
+            result.append(f'__{escape_markdown(content)}__')
         else:
             formatted_parts = []
             sub_last = 0
             for var_match in var_pattern.finditer(content):
                 # Add text before the variable, escaped
                 if var_match.start() > sub_last:
-                    formatted_parts.append(escape(content[sub_last:var_match.start()]))
+                    formatted_parts.append(escape_markdown(content[sub_last:var_match.start()]))
 
                 var_name = var_match.group(1)
                 if var_name.lower() in common_words and len(var_name) > 1:
-                    formatted_parts.append(escape(var_name))
+                    formatted_parts.append(escape_markdown(var_name))
                 else:
-                    formatted_parts.append(f'<i>{escape(var_name)}</i>')
+                    formatted_parts.append(f'_{escape_markdown(var_name)}_')
 
                 sub_last = var_match.end()
 
             if sub_last < len(content):
-                formatted_parts.append(escape(content[sub_last:]))
+                formatted_parts.append(escape_markdown(content[sub_last:]))
 
             if formatted_parts:
                 result.append(''.join(formatted_parts))
             else:
-                result.append(escape(content))
+                result.append(escape_markdown(content))
 
         last_end = match.end()
 
     # Append any remaining text after the last match
-    result.append(escape(text[last_end:]))
+    result.append(escape_markdown(text[last_end:]))
 
     return ''.join(result)
 
@@ -328,7 +332,7 @@ def process_ai_response(response_text, chat_id):
 
     if not latex_blocks:
         formatted_text = convert_inline_latex_to_telegram(response_text)
-        send_message(chat_id, formatted_text, parse_mode="HTML")
+        send_message(chat_id, formatted_text, parse_mode="MarkdownV2")
         return
     
     # Split text around LaTeX blocks and send sequentially
@@ -341,7 +345,7 @@ def process_ai_response(response_text, chat_id):
             if text_before_raw.strip():
                 formatted_text = convert_inline_latex_to_telegram(text_before_raw)
                 if formatted_text:
-                    send_message(chat_id, formatted_text, parse_mode="HTML")
+                    send_message(chat_id, formatted_text, parse_mode="MarkdownV2")
         
         # Render and send LaTeX as image
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
@@ -350,19 +354,18 @@ def process_ai_response(response_text, chat_id):
         try:
             if render_latex_to_image(block['content'], image_path):
                 # Send the image
-                caption = "LaTeX"
-                if send_photo_to_telegram(chat_id, image_path, caption):
+                if send_photo_to_telegram(chat_id, image_path):
                     print(f"Successfully sent LaTeX image for block {i}")
                 else:
                     # Fallback: send as code block if image sending fails
-                    escaped_content = escape(block['content'])
-                    fallback_message = f"<pre language=\"latex\">{escaped_content}</pre>"
-                    send_message(chat_id, fallback_message, parse_mode="HTML")
+                    escaped_content = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', block['content'])
+                    fallback_message = f"```latex\n{escaped_content}\n```"
+                    send_message(chat_id, fallback_message, parse_mode="MarkdownV2")
             else:
                 # Fallback: send as code block if rendering fails
-                escaped_content = escape(block['content'])
-                fallback_message = f"<pre language=\"latex\">{escaped_content}</pre>"
-                send_message(chat_id, fallback_message, parse_mode="HTML")
+                escaped_content = re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', block['content'])
+                fallback_message = f"```latex\n{escaped_content}\n```"
+                send_message(chat_id, fallback_message, parse_mode="MarkdownV2")
         finally:
             # Clean up temp file
             try:
@@ -378,7 +381,7 @@ def process_ai_response(response_text, chat_id):
         if text_after_raw.strip():
             formatted_text = convert_inline_latex_to_telegram(text_after_raw)
             if formatted_text:
-                send_message(chat_id, formatted_text, parse_mode="HTML")
+                send_message(chat_id, formatted_text, parse_mode="MarkdownV2")
 
 
 def get_reply(message, image_data_64, session_id):
@@ -942,7 +945,7 @@ def long_polling():
                     full_msg = f"{base_msg}\n{capability_msg}"
                 else:
                     full_msg = base_msg
-                send_message(chat_id, full_msg)
+                send_message(chat_id, escape_markdown(full_msg), parse_mode="MarkdownV2")
                 
                 # Acknowledge the callback query
                 requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
@@ -1011,7 +1014,7 @@ def long_polling():
                 reply_text += "/currentprofile - show current active profile\n"
                 reply_text += "/deactivate - return to default configuration"
 
-                send_message(chat_id, reply_text)
+                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                 continue  # Skip the rest of the processing loop
 
             if message_text.startswith('/status'):
@@ -1046,13 +1049,13 @@ def long_polling():
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
                 reply_text += f"Chatbot version: {version}\n"
-                send_message(chat_id, reply_text)
+                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                 continue
 
             if message_text.startswith('/maxrounds'):
                 if len(message_text.split()) == 1:
                     reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
-                    send_message(chat_id, reply_text)
+                    send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                     continue
 
                 max_rounds = DEFAULT_MAX_ROUNDS
@@ -1067,14 +1070,14 @@ def long_polling():
                 
                 session_data[chat_id]['max_rounds'] = max_rounds
                 reply_text = f"Max rounds set to {max_rounds}"
-                send_message(chat_id, reply_text)
+                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                 continue  
 
             # Check for command to clear context
             if message_text.startswith('/clear'):
                 clear_context(chat_id)
                 reply_text = f"Context cleared"
-                send_message(chat_id, reply_text)
+                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                 continue  # Skip the rest of the processing loop
 
             # Handle profile activation
@@ -1090,15 +1093,15 @@ def long_polling():
                         reply += "\n\nUse: /activate <profile_name>"
                     else:
                         reply = "No profiles available."
-                    send_message(chat_id, reply)
+                    send_message(chat_id, escape_markdown(reply), parse_mode="MarkdownV2")
                     continue
                 
                 profile_name = parts[1]
                 success, message, greeting = load_profile(profile_name, chat_id)
                 
-                send_message(chat_id, message)
+                send_message(chat_id, message, parse_mode="MarkdownV2")
                 if success and greeting:
-                    send_message(chat_id, greeting)
+                    send_message(chat_id, escape_markdown(greeting), parse_mode="MarkdownV2")
                 continue
 
             # Handle list profiles command
@@ -1112,7 +1115,7 @@ def long_polling():
                     reply += "\nUse /activate <profile_name> to activate a profile"
                 else:
                     reply = "No profiles available."
-                send_message(chat_id, reply)
+                send_message(chat_id, escape_markdown(reply), parse_mode="MarkdownV2")
                 continue
 
             # Handle current profile command
@@ -1127,7 +1130,7 @@ def long_polling():
                     reply += f"Model: {session_data[chat_id]['model_version']}"
                 else:
                     reply = "No profile activated. Using default configuration."
-                send_message(chat_id, reply)
+                send_message(chat_id, escape_markdown(reply), parse_mode="MarkdownV2")
                 continue
 
             # Handle deactivate profile command
@@ -1137,24 +1140,24 @@ def long_polling():
                 session_data[chat_id]['profile_name'] = None
                 session_data[chat_id]['personality_name'] = None
                 reply = "Profile deactivated. Returned to default configuration."
-                send_message(chat_id, reply)
+                send_message(chat_id, escape_markdown(reply), parse_mode="MarkdownV2")
                 continue
 
             # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
             if message_text.startswith('/listopenroutermodels'):
                 reply_text = list_openrouter_models_as_message()
-                send_message(chat_id, reply_text)
+                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                 continue  # Skip the rest of the processing loop
                 
             # Handle /openrouter command in long_polling
             if message_text.startswith("/openrouter"):
                 if len(message_text.split()) == 1:
-                    send_message(chat_id, "Please specify a model name after the command")
+                    send_message(chat_id, escape_markdown("Please specify a model name after the command"), parse_mode="MarkdownV2")
                     continue
                 model_substring = message_text.split()[1]
                 matching_models = get_matching_models(model_substring)
                 if len(matching_models) == 0:
-                    send_message(chat_id, f"Model name {model_substring} not found in list of models")
+                    send_message(chat_id, escape_markdown(f"Model name {model_substring} not found in list of models"), parse_mode="MarkdownV2")
                     continue
                 elif len(matching_models) == 1:
                     model_id = matching_models[0]
@@ -1168,20 +1171,20 @@ def long_polling():
                         full_msg = f"{base_msg}\n{capability_msg}"
                     else:
                         full_msg = base_msg
-                    send_message(chat_id, full_msg)
+                    send_message(chat_id, escape_markdown(full_msg), parse_mode="MarkdownV2")
                     continue
                 else:
                     keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
                     reply_markup = {'inline_keyboard': keyboard}
                     # print(f'Keybord {keyboard}')
-                    send_message(chat_id, "Multiple models found, please select one:", reply_markup=reply_markup)
+                    send_message(chat_id, escape_markdown("Multiple models found, please select one:"), reply_markup=reply_markup, parse_mode="MarkdownV2")
                     continue
 
             # Check for other commands to switch models (excluding /openrouter here)
             elif message_text.startswith("/gpt3") or message_text.startswith("/gpt4") or message_text.startswith("/claud3") or message_text.startswith("/llama3"):
                 update_model_version(chat_id, message_text)
                 reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
-                send_message(chat_id, reply_text)
+                send_message(chat_id, escape_markdown(reply_text), parse_mode="MarkdownV2")
                 continue
 
 
@@ -1337,7 +1340,7 @@ def send_image_to_telegram(chat_id, image_data, mime_type):
     except Exception as e:
         print(f"Exception sending image: {e}")
         # Send text message as fallback
-        send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed.")
+        send_message(chat_id, escape_markdown(f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed."), parse_mode="MarkdownV2")
 
 
 long_polling()
