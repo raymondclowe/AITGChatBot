@@ -285,7 +285,7 @@ def get_reply(message, image_data_64, session_id):
             
             # Helper function to add image without duplicates
             def add_image_if_unique(image_data, mime_type):
-                image_hash = hashlib.md5(image_data).hexdigest()
+                image_hash = hashlib.sha256(image_data).hexdigest()
                 if image_hash not in seen_image_hashes:
                     seen_image_hashes.add(image_hash)
                     images_received.append((image_data, mime_type))
@@ -356,10 +356,6 @@ def get_reply(message, image_data_64, session_id):
             # Send any images to Telegram
             for image_data, mime_type in images_received:
                 send_image_to_telegram(session_id, image_data, mime_type)
-            
-            # If we sent images but have no text, don't show an error message
-            if not response_text and images_received:
-                response_text = ""  # Empty response - images were sent successfully
         else:
             response_text = "API error: No response choices returned." + note
             
