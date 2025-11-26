@@ -274,6 +274,15 @@ def get_reply(message, image_data_64, session_id):
     tokens_used = session_data[session_id]["tokens_used"]
     images_received = []  # Initialize for all models
     seen_image_hashes = set()  # Track image hashes to avoid duplicates
+
+    # Helper function to add image without duplicates
+    def add_image_if_unique(image_data, mime_type):
+        image_hash = hashlib.sha256(image_data).hexdigest()
+        if image_hash not in seen_image_hashes:
+            seen_image_hashes.add(image_hash)
+            images_received.append((image_data, mime_type))
+            return True
+        return False
     
     if model.startswith("gpt") or model.startswith("openrouter"):
         tokens_used += raw_json["usage"]["total_tokens"]
@@ -282,15 +291,6 @@ def get_reply(message, image_data_64, session_id):
         if raw_json["choices"]:
             message = raw_json["choices"][0]["message"]
             message_content = message["content"]
-            
-            # Helper function to add image without duplicates
-            def add_image_if_unique(image_data, mime_type):
-                image_hash = hashlib.sha256(image_data).hexdigest()
-                if image_hash not in seen_image_hashes:
-                    seen_image_hashes.add(image_hash)
-                    images_received.append((image_data, mime_type))
-                    return True
-                return False
             
             # Check if content is a list (multipart) or string (text only)
             if isinstance(message_content, list):
