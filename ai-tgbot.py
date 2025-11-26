@@ -12,6 +12,7 @@ import requests
 import base64
 import os
 import json
+import hashlib
 from datetime import datetime
 import time
 
@@ -255,11 +256,33 @@ def get_reply(message, image_data_64, session_id):
 
     if "error" in raw_json:
         print("Error detected in AI backend response.")
-        return f"Error message: {raw_json['error']['message']}" + note, 0
+        error_info = raw_json.get('error', {})
+        error_message = error_info.get('message', 'Unknown error')
+        error_type = error_info.get('type', '')
+        error_code = error_info.get('code', '')
+        
+        # Build a detailed error message
+        error_parts = [f"API Error: {error_message}"]
+        if error_type:
+            error_parts.append(f"Type: {error_type}")
+        if error_code:
+            error_parts.append(f"Code: {error_code}")
+        
+        return "\n".join(error_parts) + note, 0
 
     # Update tokens used and process the response based on the model used
     tokens_used = session_data[session_id]["tokens_used"]
     images_received = []  # Initialize for all models
+    seen_image_hashes = set()  # Track image hashes to avoid duplicates
+
+    # Helper function to add image without duplicates
+    def add_image_if_unique(image_data, mime_type):
+        image_hash = hashlib.sha256(image_data).hexdigest()
+        if image_hash not in seen_image_hashes:
+            seen_image_hashes.add(image_hash)
+            images_received.append((image_data, mime_type))
+            return True
+        return False
     
     if model.startswith("gpt") or model.startswith("openrouter"):
         tokens_used += raw_json["usage"]["total_tokens"]
@@ -285,8 +308,8 @@ def get_reply(message, image_data_64, session_id):
                                 header, data = image_url.split(",", 1)
                                 mime_type = header.split(":")[1].split(";")[0]
                                 image_data = base64.b64decode(data)
-                                images_received.append((image_data, mime_type))
-                                response_parts.append(f"[Image generated: {len(image_data)} bytes, {mime_type}]")
+                                if add_image_if_unique(image_data, mime_type):
+                                    print(f"Added image from content list: {len(image_data)} bytes, {mime_type}")
                             except Exception as e:
                                 response_parts.append(f"[Unable to process image: {e}]")
                         else:
@@ -298,16 +321,17 @@ def get_reply(message, image_data_64, session_id):
                         data = inline_data.get("data", "")
                         try:
                             image_data = base64.b64decode(data)
-                            images_received.append((image_data, mime_type))
-                            response_parts.append(f"[Image generated: {len(image_data)} bytes, {mime_type}]")
+                            if add_image_if_unique(image_data, mime_type):
+                                print(f"Added image from inline_data: {len(image_data)} bytes, {mime_type}")
                         except Exception as e:
                             response_parts.append(f"[Unable to process inline data: {e}]")
                 
-                response_text = "\n".join(response_parts) if response_parts else "No text content received."
+                # Only include actual text content, not placeholder messages
+                response_text = "\n".join(response_parts) if response_parts else ""
                     
             else:
                 # Simple string response (OpenRouter format: text in content, images in separate array)
-                response_text = message_content.strip() if message_content else "API error occurred." + note
+                response_text = message_content.strip() if message_content else ""
                 
             # Check for images in separate images array (OpenRouter format)
             if message.get("images"):
@@ -320,8 +344,10 @@ def get_reply(message, image_data_64, session_id):
                                 header, data = image_url.split(",", 1)
                                 mime_type = header.split(":")[1].split(";")[0]
                                 image_data = base64.b64decode(data)
-                                images_received.append((image_data, mime_type))
-                                print(f"Found image in separate images array: {len(image_data)} bytes, {mime_type}")
+                                if add_image_if_unique(image_data, mime_type):
+                                    print(f"Added image from images array: {len(image_data)} bytes, {mime_type}")
+                                else:
+                                    print(f"Skipped duplicate image from images array")
                             except Exception as e:
                                 print(f"Error processing image from images array: {e}")
                         else:
@@ -331,7 +357,7 @@ def get_reply(message, image_data_64, session_id):
             for image_data, mime_type in images_received:
                 send_image_to_telegram(session_id, image_data, mime_type)
         else:
-            response_text = "API error occurred." + note
+            response_text = "API error: No response choices returned." + note
             
         print(f"Response text for gpt or openrouter model: {response_text}")
     elif model.startswith("claud"):
@@ -845,7 +871,9 @@ def long_polling():
         try:            
            # Get reply from OpenAI and send it back to the user
             reply_text, tokens_used = get_reply(message_text, image_data_base64, chat_id)
-            send_message(chat_id, reply_text )
+            # Only send text message if there's actual content to send
+            if reply_text and reply_text.strip():
+                send_message(chat_id, reply_text)
 
         except Exception as e:
             print(f"Error getting reply  on line {e.__traceback__.tb_lineno}: {e}")
