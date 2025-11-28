@@ -286,7 +286,16 @@ def get_reply(message, image_data_64, session_id):
     
     # Helper function to extract and add image from a data URL
     def process_image_url(image_url, source_name):
-        """Extract and add image from a data URL. Returns True if image was added."""
+        """
+        Extract and add image from a data URL.
+        
+        Args:
+            image_url: The data URL string (e.g., "data:image/png;base64,...")
+            source_name: Description of where the image came from (for logging)
+            
+        Returns:
+            True if image was successfully added, False otherwise
+        """
         if not image_url.startswith("data:image/"):
             print(f"Non-data image URL in {source_name}: {image_url}")
             return False
@@ -338,9 +347,9 @@ def get_reply(message, image_data_64, session_id):
                             continue
                         # Handle image responses
                         image_url = part["image_url"].get("url", "")
-                        if not process_image_url(image_url, "content list"):
-                            if not image_url.startswith("data:image/"):
-                                response_parts.append(f"[Image URL: {image_url}]")
+                        # Add non-data URLs as text links (process_image_url returns False for non-data URLs)
+                        if not process_image_url(image_url, "content list") and not image_url.startswith("data:image/"):
+                            response_parts.append(f"[Image URL: {image_url}]")
                     elif part.get("inline_data"):
                         # Handle Gemini-style inline data - only if no images from array
                         if images_from_array:
