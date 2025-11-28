@@ -449,31 +449,6 @@ def download_image(file_path):
     return response.content
 
 
-# Function to send image to Telegram
-def send_image_to_telegram(chat_id, base64_data):
-    try:
-        # Decode base64 data
-        image_data = base64.b64decode(base64_data)
-        
-        # Send as photo to Telegram
-        files = {'photo': ('image.png', image_data, 'image/png')}
-        data = {'chat_id': chat_id}
-        
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_KEY}/sendPhoto",
-            files=files,
-            data=data
-        )
-        
-        if response.ok:
-            print(f"Successfully sent generated image to chat {chat_id}")
-        else:
-            print(f"Failed to send image: {response.text}")
-            
-    except Exception as e:
-        print(f"Error sending image to Telegram: {e}")
-
-
 # get list from https://openrouter.ai/api/v1/models
 def list_openrouter_models_as_message():
     response = requests.get(f"https://openrouter.ai/api/v1/models")
