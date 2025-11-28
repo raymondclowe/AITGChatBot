@@ -284,6 +284,26 @@ def get_reply(message, image_data_64, session_id):
             return True
         return False
     
+    # Helper function to extract and add image from a data URL
+    def process_image_url(image_url, source_name):
+        """Extract and add image from a data URL. Returns True if image was added."""
+        if not image_url.startswith("data:image/"):
+            print(f"Non-data image URL in {source_name}: {image_url}")
+            return False
+        try:
+            header, data = image_url.split(",", 1)
+            mime_type = header.split(":")[1].split(";")[0]
+            image_data = base64.b64decode(data)
+            if add_image_if_unique(image_data, mime_type):
+                print(f"Added image from {source_name}: {len(image_data)} bytes, {mime_type}")
+                return True
+            else:
+                print(f"Skipped duplicate image from {source_name}")
+                return False
+        except Exception as e:
+            print(f"Error processing image from {source_name}: {e}")
+            return False
+    
     if model.startswith("gpt") or model.startswith("openrouter"):
         tokens_used += raw_json["usage"]["total_tokens"]
         
@@ -300,21 +320,8 @@ def get_reply(message, image_data_64, session_id):
                 for image_item in message["images"]:
                     if image_item.get("type") == "image_url" and image_item.get("image_url"):
                         image_url = image_item["image_url"].get("url", "")
-                        if image_url.startswith("data:image/"):
-                            # Extract base64 data
-                            try:
-                                header, data = image_url.split(",", 1)
-                                mime_type = header.split(":")[1].split(";")[0]
-                                image_data = base64.b64decode(data)
-                                if add_image_if_unique(image_data, mime_type):
-                                    print(f"Added image from images array: {len(image_data)} bytes, {mime_type}")
-                                    images_from_array = True
-                                else:
-                                    print(f"Skipped duplicate image from images array")
-                            except Exception as e:
-                                print(f"Error processing image from images array: {e}")
-                        else:
-                            print(f"Non-data image URL in images array: {image_url}")
+                        if process_image_url(image_url, "images array"):
+                            images_from_array = True
             
             # Check if content is a list (multipart) or string (text only)
             if isinstance(message_content, list):
@@ -331,18 +338,9 @@ def get_reply(message, image_data_64, session_id):
                             continue
                         # Handle image responses
                         image_url = part["image_url"].get("url", "")
-                        if image_url.startswith("data:image/"):
-                            # Extract base64 data
-                            try:
-                                header, data = image_url.split(",", 1)
-                                mime_type = header.split(":")[1].split(";")[0]
-                                image_data = base64.b64decode(data)
-                                if add_image_if_unique(image_data, mime_type):
-                                    print(f"Added image from content list: {len(image_data)} bytes, {mime_type}")
-                            except Exception as e:
-                                response_parts.append(f"[Unable to process image: {e}]")
-                        else:
-                            response_parts.append(f"[Image URL: {image_url}]")
+                        if not process_image_url(image_url, "content list"):
+                            if not image_url.startswith("data:image/"):
+                                response_parts.append(f"[Image URL: {image_url}]")
                     elif part.get("inline_data"):
                         # Handle Gemini-style inline data - only if no images from array
                         if images_from_array:
