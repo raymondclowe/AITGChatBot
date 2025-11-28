@@ -326,20 +326,13 @@ def get_reply(message, image_data_64, session_id):
             # First, check for images in the dedicated images array (OpenRouter canonical format)
             # Per OpenRouter docs: images should be in a separate "images" array
             # We check this FIRST and only fall back to content array if no images found
-            # NOTE: Some models (e.g., gemini-3-pro-image-preview) return duplicate images
-            # in the images array with slightly different byte representations. We only
-            # take the FIRST image to avoid sending duplicates to the user.
             images_from_array = False
             if message.get("images"):
-                images_array = message["images"]
-                if len(images_array) > 1:
-                    print(f"Warning: Model returned {len(images_array)} images in images array, taking only first to avoid duplicates")
-                # Only process the first image from the array
-                image_item = images_array[0]
-                if image_item.get("type") == "image_url" and image_item.get("image_url"):
-                    image_url = image_item["image_url"].get("url", "")
-                    if process_image_url(image_url, "images array"):
-                        images_from_array = True
+                for image_item in message["images"]:
+                    if image_item.get("type") == "image_url" and image_item.get("image_url"):
+                        image_url = image_item["image_url"].get("url", "")
+                        if process_image_url(image_url, "images array"):
+                            images_from_array = True
             
             # Check if content is a list (multipart) or string (text only)
             if isinstance(message_content, list):
@@ -454,31 +447,6 @@ def download_image(file_path):
     file_url = f"https://api.telegram.org/file/bot{BOT_KEY}/{file_path}"
     response = requests.get(file_url)
     return response.content
-
-
-# Function to send image to Telegram
-def send_image_to_telegram(chat_id, base64_data):
-    try:
-        # Decode base64 data
-        image_data = base64.b64decode(base64_data)
-        
-        # Send as photo to Telegram
-        files = {'photo': ('image.png', image_data, 'image/png')}
-        data = {'chat_id': chat_id}
-        
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_KEY}/sendPhoto",
-            files=files,
-            data=data
-        )
-        
-        if response.ok:
-            print(f"Successfully sent generated image to chat {chat_id}")
-        else:
-            print(f"Failed to send image: {response.text}")
-            
-    except Exception as e:
-        print(f"Error sending image to Telegram: {e}")
 
 
 # get list from https://openrouter.ai/api/v1/models
