@@ -335,12 +335,11 @@ def get_reply(message, image_data_64, session_id):
                 if len(images_array) > 1:
                     print(f"Warning: Model returned {len(images_array)} images in images array, taking only first to avoid duplicates")
                 # Only process the first image from the array
-                if images_array:
-                    image_item = images_array[0]
-                    if image_item.get("type") == "image_url" and image_item.get("image_url"):
-                        image_url = image_item["image_url"].get("url", "")
-                        if process_image_url(image_url, "images array"):
-                            images_from_array = True
+                image_item = images_array[0]
+                if image_item.get("type") == "image_url" and image_item.get("image_url"):
+                    image_url = image_item["image_url"].get("url", "")
+                    if process_image_url(image_url, "images array"):
+                        images_from_array = True
             
             # Check if content is a list (multipart) or string (text only)
             if isinstance(message_content, list):
