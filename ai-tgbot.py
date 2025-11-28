@@ -154,6 +154,8 @@ def get_reply(message, image_data_64, session_id):
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "HTTP-Referer": "https://github.com/raymondclowe/AITGChatBot",
+                "X-Title": "AITGChatBot",
             },
             json=payload,
         )
