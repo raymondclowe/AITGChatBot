@@ -292,6 +292,30 @@ def get_reply(message, image_data_64, session_id):
             message = raw_json["choices"][0]["message"]
             message_content = message["content"]
             
+            # First, check for images in the dedicated images array (OpenRouter canonical format)
+            # Per OpenRouter docs: images should be in a separate "images" array
+            # We check this FIRST and only fall back to content array if no images found
+            images_from_array = False
+            if message.get("images"):
+                for image_item in message["images"]:
+                    if image_item.get("type") == "image_url" and image_item.get("image_url"):
+                        image_url = image_item["image_url"].get("url", "")
+                        if image_url.startswith("data:image/"):
+                            # Extract base64 data
+                            try:
+                                header, data = image_url.split(",", 1)
+                                mime_type = header.split(":")[1].split(";")[0]
+                                image_data = base64.b64decode(data)
+                                if add_image_if_unique(image_data, mime_type):
+                                    print(f"Added image from images array: {len(image_data)} bytes, {mime_type}")
+                                    images_from_array = True
+                                else:
+                                    print(f"Skipped duplicate image from images array")
+                            except Exception as e:
+                                print(f"Error processing image from images array: {e}")
+                        else:
+                            print(f"Non-data image URL in images array: {image_url}")
+            
             # Check if content is a list (multipart) or string (text only)
             if isinstance(message_content, list):
                 response_parts = []
@@ -300,6 +324,11 @@ def get_reply(message, image_data_64, session_id):
                     if part.get("type") == "text" and part.get("text"):
                         response_parts.append(part["text"])
                     elif part.get("type") == "image_url" and part.get("image_url"):
+                        # Only process images from content if we didn't already get images from the images array
+                        # This prevents duplicate images when model returns same image in both locations
+                        if images_from_array:
+                            print(f"Skipping image from content list (already have images from images array)")
+                            continue
                         # Handle image responses
                         image_url = part["image_url"].get("url", "")
                         if image_url.startswith("data:image/"):
@@ -315,7 +344,10 @@ def get_reply(message, image_data_64, session_id):
                         else:
                             response_parts.append(f"[Image URL: {image_url}]")
                     elif part.get("inline_data"):
-                        # Handle Gemini-style inline data
+                        # Handle Gemini-style inline data - only if no images from array
+                        if images_from_array:
+                            print(f"Skipping inline_data (already have images from images array)")
+                            continue
                         inline_data = part["inline_data"]
                         mime_type = inline_data.get("mimeType", "unknown")
                         data = inline_data.get("data", "")
@@ -332,26 +364,6 @@ def get_reply(message, image_data_64, session_id):
             else:
                 # Simple string response (OpenRouter format: text in content, images in separate array)
                 response_text = message_content.strip() if message_content else ""
-                
-            # Check for images in separate images array (OpenRouter format)
-            if message.get("images"):
-                for image_item in message["images"]:
-                    if image_item.get("type") == "image_url" and image_item.get("image_url"):
-                        image_url = image_item["image_url"].get("url", "")
-                        if image_url.startswith("data:image/"):
-                            # Extract base64 data
-                            try:
-                                header, data = image_url.split(",", 1)
-                                mime_type = header.split(":")[1].split(";")[0]
-                                image_data = base64.b64decode(data)
-                                if add_image_if_unique(image_data, mime_type):
-                                    print(f"Added image from images array: {len(image_data)} bytes, {mime_type}")
-                                else:
-                                    print(f"Skipped duplicate image from images array")
-                            except Exception as e:
-                                print(f"Error processing image from images array: {e}")
-                        else:
-                            print(f"Non-data image URL in images array: {image_url}")
             
             # Send any images to Telegram
             for image_data, mime_type in images_received:
