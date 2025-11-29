@@ -289,7 +289,9 @@ def get_reply(message, image_data_64, session_id):
         # If an image size is within 1% of an already-seen image, treat as duplicate
         image_size = len(image_data)
         for seen_size in seen_image_sizes:
-            size_diff_ratio = abs(image_size - seen_size) / max(seen_size, 1)
+            # Use max of both sizes to avoid division issues with very small images
+            max_size = max(seen_size, image_size, 1)
+            size_diff_ratio = abs(image_size - seen_size) / max_size
             if size_diff_ratio < 0.01:  # Within 1% size difference
                 print(f"Skipped near-duplicate image: {image_size} bytes (similar to {seen_size} bytes)")
                 return False
