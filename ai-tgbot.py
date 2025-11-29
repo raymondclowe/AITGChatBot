@@ -334,16 +334,17 @@ def get_reply(message, image_data_64, session_id):
             # 4. Images in BOTH parts of response - show only ones from images[] list
             #
             # Note: Some providers (AI Studio) return non-byte-identical copies of the same
-            # image in both locations. We prefer images[] when it has valid entries to
+            # image in both locations. We prefer images[] when it has valid data URLs to
             # avoid duplicate images, even if they have different byte content/encoding.
             images_from_array = False
             if message.get("images"):
                 for image_item in message["images"]:
                     if image_item.get("type") == "image_url" and image_item.get("image_url"):
                         image_url = image_item["image_url"].get("url", "")
-                        # Mark that images[] has valid entries - we prefer this source
-                        # to avoid showing duplicate images from both locations
-                        images_from_array = True
+                        # Only prefer images[] if it has valid data URLs (starts with data:image/)
+                        # This ensures we fall back to content list if images[] has invalid URLs
+                        if image_url.startswith("data:image/"):
+                            images_from_array = True
                         process_image_url(image_url, "images array")
             
             # Check if content is a list (multipart) or string (text only)
