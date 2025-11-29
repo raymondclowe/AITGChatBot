@@ -326,13 +326,21 @@ def get_reply(message, image_data_64, session_id):
             # First, check for images in the dedicated images array (OpenRouter canonical format)
             # Per OpenRouter docs: images should be in a separate "images" array
             # We check this FIRST and only fall back to content array if no images found
+            # 
+            # Handle 4 cases for duplicate images from different providers:
+            # 1. No image data - show nothing
+            # 2. Image data only in images[] - show only those images
+            # 3. Image data in another part of response but not in images[] - show that data
+            # 4. Images in BOTH parts of response - show only ones from images[] list
             images_from_array = False
             if message.get("images"):
                 for image_item in message["images"]:
                     if image_item.get("type") == "image_url" and image_item.get("image_url"):
                         image_url = image_item["image_url"].get("url", "")
-                        if process_image_url(image_url, "images array"):
-                            images_from_array = True
+                        # Mark that images array has valid entries - we prefer this source
+                        # even if individual image processing fails
+                        images_from_array = True
+                        process_image_url(image_url, "images array")
             
             # Check if content is a list (multipart) or string (text only)
             if isinstance(message_content, list):
