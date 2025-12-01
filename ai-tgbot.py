@@ -42,9 +42,16 @@ if KIOSK_MODE and KIOSK_PROMPT_FILE:
             KIOSK_SYSTEM_PROMPT = f.read().strip()
         print(f"Kiosk mode: Loaded system prompt from {KIOSK_PROMPT_FILE} ({len(KIOSK_SYSTEM_PROMPT)} chars)")
     except FileNotFoundError:
-        print(f"Warning: Kiosk prompt file not found: {KIOSK_PROMPT_FILE}")
+        print(f"ERROR: Kiosk prompt file not found: {KIOSK_PROMPT_FILE}")
+        print(f"  Please create the file or update KIOSK_PROMPT_FILE environment variable.")
+        print(f"  The bot will run without a system prompt until this is fixed.")
+    except PermissionError:
+        print(f"ERROR: Permission denied reading kiosk prompt file: {KIOSK_PROMPT_FILE}")
+        print(f"  Please check file permissions and ensure the bot has read access.")
     except IOError as e:
-        print(f"Warning: Error reading kiosk prompt file: {e}")
+        print(f"ERROR: Could not read kiosk prompt file: {KIOSK_PROMPT_FILE}")
+        print(f"  Error details: {e}")
+        print(f"  The bot will run without a system prompt until this is fixed.")
 
 if KIOSK_MODE:
     print(f"🔒 KIOSK MODE ENABLED")
@@ -123,6 +130,8 @@ def check_inactivity_timeout(chat_id):
     if time.time() - last_activity > KIOSK_INACTIVITY_TIMEOUT:
         # Clear conversation but keep session
         clear_context(chat_id)
+        # Reset activity timestamp to prevent immediate re-clearing
+        session_data[chat_id]['last_activity'] = time.time()
         return True
     return False
 
