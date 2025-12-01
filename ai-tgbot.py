@@ -1,4 +1,4 @@
-version = "1.6.1"
+version = "1.7.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -7,6 +7,7 @@ version = "1.6.1"
 # 1.4.0 - gpt4o-mini support and becomes the default
 # 1.5.0 - openrouter buttons
 # 1.6.0 - image in and out
+# 1.7.0 - kiosk mode for locked-down dedicated instances
 
 import requests
 import base64
@@ -22,6 +23,34 @@ BOT_KEY = os.environ.get('BOT_KEY')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+
+# Kiosk mode configuration
+# KIOSK_MODE: Set to 'true' to enable kiosk mode (locks model and prompt)
+# KIOSK_MODEL: The model to use in kiosk mode (e.g., 'gpt-4o', 'openrouter:google/gemini-2.0-flash-001')
+# KIOSK_PROMPT_FILE: Path to a text file containing the system prompt
+# KIOSK_INACTIVITY_TIMEOUT: Seconds of inactivity before auto-clearing conversation (0 = disabled)
+KIOSK_MODE = os.environ.get('KIOSK_MODE', 'false').lower() == 'true'
+KIOSK_MODEL = os.environ.get('KIOSK_MODEL', 'gpt-4o-mini')
+KIOSK_PROMPT_FILE = os.environ.get('KIOSK_PROMPT_FILE', '')
+KIOSK_INACTIVITY_TIMEOUT = int(os.environ.get('KIOSK_INACTIVITY_TIMEOUT', '0'))
+
+# Load system prompt from file if kiosk mode is enabled
+KIOSK_SYSTEM_PROMPT = ""
+if KIOSK_MODE and KIOSK_PROMPT_FILE:
+    try:
+        with open(KIOSK_PROMPT_FILE, 'r', encoding='utf-8') as f:
+            KIOSK_SYSTEM_PROMPT = f.read().strip()
+        print(f"Kiosk mode: Loaded system prompt from {KIOSK_PROMPT_FILE} ({len(KIOSK_SYSTEM_PROMPT)} chars)")
+    except FileNotFoundError:
+        print(f"Warning: Kiosk prompt file not found: {KIOSK_PROMPT_FILE}")
+    except IOError as e:
+        print(f"Warning: Error reading kiosk prompt file: {e}")
+
+if KIOSK_MODE:
+    print(f"🔒 KIOSK MODE ENABLED")
+    print(f"   Model: {KIOSK_MODEL}")
+    print(f"   System prompt: {'Loaded' if KIOSK_SYSTEM_PROMPT else 'Not set'}")
+    print(f"   Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s" if KIOSK_INACTIVITY_TIMEOUT > 0 else "   Inactivity timeout: Disabled")
 
 # Set the URL for the API
 OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
@@ -45,6 +74,63 @@ session_data = {}
 
 # default conversation max rounds is 4 which is double the previous version of the bot
 DEFAULT_MAX_ROUNDS = 4
+
+
+def get_default_model():
+    """Get the default model based on kiosk mode setting"""
+    if KIOSK_MODE:
+        return KIOSK_MODEL
+    return "gpt-4o-mini"
+
+
+def initialize_session(chat_id):
+    """Initialize a new session with proper defaults for kiosk or normal mode"""
+    model = get_default_model()
+    session = {
+        'model_version': model,
+        'CONVERSATION': [],
+        'tokens_used': 0,
+        'max_rounds': DEFAULT_MAX_ROUNDS,
+        'last_activity': time.time()
+    }
+    
+    # Set provider for openrouter models
+    if model.startswith("openrouter:"):
+        session['provider'] = 'openrouter'
+    
+    # Add system prompt for kiosk mode
+    if KIOSK_MODE and KIOSK_SYSTEM_PROMPT:
+        session['CONVERSATION'] = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": KIOSK_SYSTEM_PROMPT}]
+            }
+        ]
+    
+    session_data[chat_id] = session
+    return session
+
+
+def check_inactivity_timeout(chat_id):
+    """Check if session should be cleared due to inactivity. Returns True if cleared."""
+    if not KIOSK_MODE or KIOSK_INACTIVITY_TIMEOUT <= 0:
+        return False
+    
+    if chat_id not in session_data:
+        return False
+    
+    last_activity = session_data[chat_id].get('last_activity', time.time())
+    if time.time() - last_activity > KIOSK_INACTIVITY_TIMEOUT:
+        # Clear conversation but keep session
+        clear_context(chat_id)
+        return True
+    return False
+
+
+def update_activity(chat_id):
+    """Update the last activity timestamp for a session"""
+    if chat_id in session_data:
+        session_data[chat_id]['last_activity'] = time.time()
 
 
 def update_model_version(session_id, command):
@@ -74,24 +160,37 @@ def update_model_version(session_id, command):
 
 
 def clear_context(chat_id):
-    session_data[chat_id]['CONVERSATION'] = []
+    """Clear conversation context, preserving system prompt in kiosk mode"""
+    if KIOSK_MODE and KIOSK_SYSTEM_PROMPT:
+        # Preserve the system prompt in kiosk mode
+        session_data[chat_id]['CONVERSATION'] = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": KIOSK_SYSTEM_PROMPT}]
+            }
+        ]
+    else:
+        session_data[chat_id]['CONVERSATION'] = []
 
 
 def get_reply(message, image_data_64, session_id):
     note = ""
     response_text = ""
     if not session_data[session_id]:
-        session_data[session_id] = {
-            "CONVERSATION": [],
-            "tokens_used": 0,
-            "model_version": "gpt-4o-mini",
-            "max_rounds": DEFAULT_MAX_ROUNDS
-        }
+        initialize_session(session_id)
     has_image = False
     # check the length of the existing conversation, if it is too long (with messages more than double the max rounds, then trim off until it is within the limit of rounds. one round is one user and one assistant text.
     max_messages = session_data[session_id]["max_rounds"] * 2
-    if len(session_data[session_id]["CONVERSATION"]) > max_messages:
-        session_data[session_id]["CONVERSATION"] = session_data[session_id]["CONVERSATION"][-max_messages:]
+    conversation = session_data[session_id]["CONVERSATION"]
+    
+    # When trimming, preserve system prompt if present (kiosk mode)
+    if len(conversation) > max_messages:
+        # Check if first message is a system prompt
+        if conversation and conversation[0].get("role") == "system":
+            # Keep system prompt + last max_messages
+            session_data[session_id]["CONVERSATION"] = [conversation[0]] + conversation[-(max_messages):]
+        else:
+            session_data[session_id]["CONVERSATION"] = conversation[-max_messages:]
 
     # Add the new user message to the conversation
     new_user_message = [
@@ -655,6 +754,14 @@ def long_polling():
                 chat_id = callback_query['message']['chat']['id']
                 selected_model = callback_query['data']
                 
+                # Block model changes in kiosk mode
+                if KIOSK_MODE:
+                    send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
+                    requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
+                        "callback_query_id": callback_query['id']
+                    })
+                    continue
+                
                 # Update the model version
                 session_data[chat_id]["model_version"] = "openrouter:" + selected_model
                 session_data[chat_id]["provider"] = "openrouter"
@@ -693,11 +800,11 @@ def long_polling():
 
             # check in the session data if there is a key with this chat_id, if not then initialize an empty one
             if chat_id not in session_data:  # doing it now because we may have to accept setting model version
-                session_data[chat_id] = {'model_version': "gpt-4o-mini",
-                                        'CONVERSATION': [],
-                                        'tokens_used': 0,
-                                        "max_rounds": DEFAULT_MAX_ROUNDS
-                                        }
+                initialize_session(chat_id)
+            
+            # Update activity timestamp and check for inactivity timeout (kiosk mode)
+            if check_inactivity_timeout(chat_id):
+                send_message(chat_id, "⏰ Your session was cleared due to inactivity.")
 
         except Exception as e:
             print(f"Error reading last message on line {e.__traceback__.tb_lineno}: {e}")
@@ -707,33 +814,50 @@ def long_polling():
 
             # implement a /help command that outputs brief explanation of commands
             if message_text.startswith('/help'):
-                reply_text = "Commands:\n"
-                reply_text += "/help - this help message\n"
-                reply_text += "/clear - clear the context\n"
-                reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
-                reply_text += "/gpt3 - set the model to gpt3\n"
-                reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
-                reply_text += "/gpt4o - set the model to gpt-4o\n"
-                reply_text += "/gpt4omini - set the model to gpt-4o-mini\n"  # Add this line
-                reply_text += "/claud3opus - set the model to Claud 3 Opus\n"
-                reply_text += "/claud3haiku - set the model to Claud 3 Haiku\n"
-                reply_text += "/llama38b - set the model to Llama 3 8B\n"
-                reply_text += "/llama370b - set the model to Llama 3 70B\n"
-                reply_text += "/listopenroutermodels - list all openrouter models with image capabilities\n"
-                reply_text += "/openrouter <model id> - set the model to the model with the given id\n"
-                reply_text += "/status - get the chatbot status, current model, current max rounds, current conversation length\n\n"
-                reply_text += "📷 Image Features:\n"
-                reply_text += "• Send images with text to vision-capable models for analysis\n"
-                reply_text += "• Models with 📷 support image input (vision)\n"  
-                reply_text += "• Models with 🎨 support image output (generation)\n"
-                reply_text += "• OpenRouter models automatically support images when capable"
+                if KIOSK_MODE:
+                    reply_text = "🔒 KIOSK MODE\n\n"
+                    reply_text += "This chatbot is running in kiosk mode with locked settings.\n\n"
+                    reply_text += "Available commands:\n"
+                    reply_text += "/help - this help message\n"
+                    reply_text += "/clear - clear the conversation context\n"
+                    reply_text += "/status - view current chatbot status\n\n"
+                    reply_text += "All other settings (model, prompt, etc.) are locked by the administrator.\n"
+                    reply_text += "Simply type your message or send an image to chat!"
+                else:
+                    reply_text = "Commands:\n"
+                    reply_text += "/help - this help message\n"
+                    reply_text += "/clear - clear the context\n"
+                    reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
+                    reply_text += "/gpt3 - set the model to gpt3\n"
+                    reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
+                    reply_text += "/gpt4o - set the model to gpt-4o\n"
+                    reply_text += "/gpt4omini - set the model to gpt-4o-mini\n"
+                    reply_text += "/claud3opus - set the model to Claud 3 Opus\n"
+                    reply_text += "/claud3haiku - set the model to Claud 3 Haiku\n"
+                    reply_text += "/llama38b - set the model to Llama 3 8B\n"
+                    reply_text += "/llama370b - set the model to Llama 3 70B\n"
+                    reply_text += "/listopenroutermodels - list all openrouter models with image capabilities\n"
+                    reply_text += "/openrouter <model id> - set the model to the model with the given id\n"
+                    reply_text += "/status - get the chatbot status, current model, current max rounds, current conversation length\n\n"
+                    reply_text += "📷 Image Features:\n"
+                    reply_text += "• Send images with text to vision-capable models for analysis\n"
+                    reply_text += "• Models with 📷 support image input (vision)\n"
+                    reply_text += "• Models with 🎨 support image output (generation)\n"
+                    reply_text += "• OpenRouter models automatically support images when capable"
 
                 send_message(chat_id, reply_text)
                 continue  # Skip the rest of the processing loop
 
             if message_text.startswith('/status'):
                 current_model = session_data[chat_id]['model_version']
-                reply_text = f"Model: {current_model}\n"
+                
+                # Show kiosk mode indicator at the top
+                if KIOSK_MODE:
+                    reply_text = "🔒 KIOSK MODE ACTIVE\n\n"
+                else:
+                    reply_text = ""
+                
+                reply_text += f"Model: {current_model}\n"
                 reply_text += f"Provider: {session_data[chat_id].get('provider', 'Not set')}\n"
                 
                 # Show image capabilities for OpenRouter models
@@ -752,13 +876,25 @@ def long_polling():
                 reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                 reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
                 reply_text += f"Chatbot version: {version}\n"
+                
+                # Show kiosk-specific info
+                if KIOSK_MODE:
+                    reply_text += "\n🔒 Settings are locked by administrator"
+                    if KIOSK_INACTIVITY_TIMEOUT > 0:
+                        reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
+                
                 send_message(chat_id, reply_text)
                 continue
 
             if message_text.startswith('/maxrounds'):
+                # Block maxrounds changes in kiosk mode (but allow viewing)
                 if len(message_text.split()) == 1:
                     reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
                     send_message(chat_id, reply_text)
+                    continue
+                
+                if KIOSK_MODE:
+                    send_message(chat_id, "🔒 Kiosk mode: Max rounds setting is locked.")
                     continue
 
                 max_rounds = DEFAULT_MAX_ROUNDS
@@ -785,12 +921,18 @@ def long_polling():
 
             # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
             if message_text.startswith('/listopenroutermodels'):
+                if KIOSK_MODE:
+                    send_message(chat_id, "🔒 Kiosk mode: Model listing is not available.")
+                    continue
                 reply_text = list_openrouter_models_as_message()
                 send_message(chat_id, reply_text)
                 continue  # Skip the rest of the processing loop
                 
             # Handle /openrouter command in long_polling
             if message_text.startswith("/openrouter"):
+                if KIOSK_MODE:
+                    send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
+                    continue
                 if len(message_text.split()) == 1:
                     send_message(chat_id, "Please specify a model name after the command")
                     continue
@@ -822,6 +964,9 @@ def long_polling():
 
             # Check for other commands to switch models (excluding /openrouter here)
             elif message_text.startswith("/gpt3") or message_text.startswith("/gpt4") or message_text.startswith("/claud3") or message_text.startswith("/llama3"):
+                if KIOSK_MODE:
+                    send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
+                    continue
                 update_model_version(chat_id, message_text)
                 reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
                 send_message(chat_id, reply_text)
@@ -880,6 +1025,8 @@ def long_polling():
         try:            
            # Get reply from OpenAI and send it back to the user
             reply_text, tokens_used = get_reply(message_text, image_data_base64, chat_id)
+            # Update activity timestamp after successful interaction
+            update_activity(chat_id)
             # Only send text message if there's actual content to send
             if reply_text and reply_text.strip():
                 send_message(chat_id, reply_text)
