@@ -276,30 +276,15 @@ def get_reply(message, image_data_64, session_id):
     tokens_used = session_data[session_id]["tokens_used"]
     images_received = []  # Initialize for all models
     seen_image_hashes = set()  # Track image hashes to avoid duplicates
-    seen_image_sizes = []  # Track image sizes to detect near-duplicate images
 
     # Helper function to add image without duplicates
     def add_image_if_unique(image_data, mime_type):
         image_hash = hashlib.sha256(image_data).hexdigest()
-        if image_hash in seen_image_hashes:
-            return False
-        
-        # Check for near-duplicate images (same visual content with different encoding)
-        # Some providers return the same image with slightly different compression/metadata
-        # If an image size is within 1% of an already-seen image, treat as duplicate
-        image_size = len(image_data)
-        for seen_size in seen_image_sizes:
-            # Use max of both sizes to avoid division issues with very small images
-            max_size = max(seen_size, image_size, 1)
-            size_diff_ratio = abs(image_size - seen_size) / max_size
-            if size_diff_ratio < 0.01:  # Within 1% size difference
-                print(f"Skipped near-duplicate image: {image_size} bytes (similar to {seen_size} bytes)")
-                return False
-        
-        seen_image_hashes.add(image_hash)
-        seen_image_sizes.append(image_size)
-        images_received.append((image_data, mime_type))
-        return True
+        if image_hash not in seen_image_hashes:
+            seen_image_hashes.add(image_hash)
+            images_received.append((image_data, mime_type))
+            return True
+        return False
     
     # Helper function to extract and add image from a data URL
     def process_image_url(image_url, source_name):
