@@ -17,15 +17,30 @@ An AI LLM powered Telegram ChatBot with switchable backends; supports OpenAI, Mi
 - `OPENROUTER_API_KEY` - OpenRouter API key
 - `GROQ_API_KEY` - Groq API key (for Llama models)
 
-### Kiosk Mode (Optional)
+## Kiosk Mode
+
 Kiosk mode provides a locked-down instance ideal for educational environments, public terminals, or dedicated single-purpose bots.
 
-- `KIOSK_MODE` - Set to `true` to enable kiosk mode
-- `KIOSK_MODEL` - The model to use (e.g., `gpt-4o`, `openrouter:google/gemini-2.0-flash-001`)
-- `KIOSK_PROMPT_FILE` - Path to a text file containing the system prompt (supports multi-line prompts)
-- `KIOSK_INACTIVITY_TIMEOUT` - Seconds of inactivity before auto-clearing conversation (0 = disabled)
+### Configuration
 
-#### Kiosk Mode Restrictions
+Kiosk mode is configured via `kiosk.conf` file. Copy `kiosk.conf.example` to `kiosk.conf` and modify as needed:
+
+```ini
+[kiosk]
+# Enable kiosk mode (true/false)
+enabled = true
+
+# The model to use in kiosk mode
+model = openrouter:google/gemini-2.0-flash-001
+
+# Path to the system prompt file
+prompt_file = kiosk_prompt_example.txt
+
+# Inactivity timeout in seconds (0 = disabled)
+inactivity_timeout = 3600
+```
+
+### Kiosk Mode Restrictions
 When kiosk mode is enabled:
 - Model selection is locked (users cannot change the model)
 - System prompt is loaded from file and cannot be modified
@@ -35,24 +50,25 @@ When kiosk mode is enabled:
 - Multi-user chats are still supported with separate conversation histories
 - Visual indicator (🔒) shows kiosk mode is active
 
-#### Example Setup for Educational Use
+### Example Setup for Educational Use
 
-1. Create a system prompt file (`education_prompt.txt`):
-```
-You are an educational tutor for IB Math and Physics. Help students understand concepts deeply.
-Use the Socratic method: ask guiding questions rather than giving direct answers.
-Always encourage the student and celebrate their progress.
-```
-
-2. Set environment variables:
+1. Copy the example config:
 ```bash
-export KIOSK_MODE=true
-export KIOSK_MODEL=openrouter:google/gemini-2.0-flash-001
-export KIOSK_PROMPT_FILE=/path/to/education_prompt.txt
-export KIOSK_INACTIVITY_TIMEOUT=3600  # Clear after 1 hour of inactivity
+cp kiosk.conf.example kiosk.conf
 ```
 
-3. Run the bot as usual:
+2. Edit `kiosk.conf` with your settings:
+```ini
+[kiosk]
+enabled = true
+model = openrouter:google/gemini-2.0-flash-001
+prompt_file = kiosk_prompt_example.txt
+inactivity_timeout = 3600
+```
+
+3. Create or edit your system prompt file (e.g., `kiosk_prompt_example.txt`)
+
+4. Run the bot:
 ```bash
 python ai-tgbot.py
 ```

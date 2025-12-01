@@ -1,0 +1,20 @@
+# Kiosk Mode Configuration File
+# Copy this file to 'kiosk.conf' and modify settings as needed.
+# The bot will automatically load kiosk.conf if it exists.
+
+[kiosk]
+# Enable kiosk mode (true/false)
+# When enabled, model selection and most settings are locked
+enabled = true
+
+# The model to use in kiosk mode
+# Examples: gpt-4o, gpt-4o-mini, openrouter:google/gemini-2.0-flash-001
+model = openrouter:google/gemini-2.0-flash-001
+
+# Path to the system prompt file (supports multi-line prompts)
+# Leave empty or comment out to run without a system prompt
+prompt_file = kiosk_prompt_example.txt
+
+# Inactivity timeout in seconds (0 = disabled)
+# Automatically clears conversation after this period of inactivity
+inactivity_timeout = 3600

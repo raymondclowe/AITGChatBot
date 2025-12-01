@@ -16,6 +16,7 @@ import json
 import hashlib
 from datetime import datetime
 import time
+import configparser
 
 # Get the API keys from the environment variables
 API_KEY = os.environ.get('API_KEY')
@@ -25,17 +26,47 @@ OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 
 # Kiosk mode configuration
-# KIOSK_MODE: Set to 'true' to enable kiosk mode (locks model and prompt)
-# KIOSK_MODEL: The model to use in kiosk mode (e.g., 'gpt-4o', 'openrouter:google/gemini-2.0-flash-001')
-# KIOSK_PROMPT_FILE: Path to a text file containing the system prompt
-# KIOSK_INACTIVITY_TIMEOUT: Seconds of inactivity before auto-clearing conversation (0 = disabled)
-KIOSK_MODE = os.environ.get('KIOSK_MODE', 'false').lower() == 'true'
-KIOSK_MODEL = os.environ.get('KIOSK_MODEL', 'gpt-4o-mini')
-KIOSK_PROMPT_FILE = os.environ.get('KIOSK_PROMPT_FILE', '')
-KIOSK_INACTIVITY_TIMEOUT = int(os.environ.get('KIOSK_INACTIVITY_TIMEOUT', '0'))
+# Settings are loaded from kiosk.conf file if it exists
+# See kiosk.conf.example for configuration options
+KIOSK_MODE = False
+KIOSK_MODEL = 'gpt-4o-mini'
+KIOSK_PROMPT_FILE = ''
+KIOSK_INACTIVITY_TIMEOUT = 0
+KIOSK_SYSTEM_PROMPT = ""
+
+def load_kiosk_config():
+    """Load kiosk mode configuration from kiosk.conf file"""
+    global KIOSK_MODE, KIOSK_MODEL, KIOSK_PROMPT_FILE, KIOSK_INACTIVITY_TIMEOUT, KIOSK_SYSTEM_PROMPT
+    
+    config_file = 'kiosk.conf'
+    if not os.path.exists(config_file):
+        return  # No config file, kiosk mode disabled
+    
+    try:
+        config = configparser.ConfigParser()
+        config.read(config_file, encoding='utf-8')
+        
+        # Parse settings from [kiosk] section
+        KIOSK_MODE = config.get('kiosk', 'enabled', fallback='false').lower() == 'true'
+        KIOSK_MODEL = config.get('kiosk', 'model', fallback='gpt-4o-mini')
+        KIOSK_PROMPT_FILE = config.get('kiosk', 'prompt_file', fallback='')
+        KIOSK_INACTIVITY_TIMEOUT = config.getint('kiosk', 'inactivity_timeout', fallback=0)
+        
+        print(f"Kiosk config: Loaded settings from {config_file}")
+        
+    except configparser.Error as e:
+        print(f"ERROR: Failed to parse kiosk config file: {config_file}")
+        print(f"  Error details: {e}")
+        return
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        print(f"ERROR: Could not read kiosk config file: {config_file}")
+        print(f"  Error details: {e}")
+        return
+
+# Load kiosk configuration
+load_kiosk_config()
 
 # Load system prompt from file if kiosk mode is enabled
-KIOSK_SYSTEM_PROMPT = ""
 if KIOSK_MODE and KIOSK_PROMPT_FILE:
     try:
         with open(KIOSK_PROMPT_FILE, 'r', encoding='utf-8') as f:
@@ -43,7 +74,7 @@ if KIOSK_MODE and KIOSK_PROMPT_FILE:
         print(f"Kiosk mode: Loaded system prompt from {KIOSK_PROMPT_FILE} ({len(KIOSK_SYSTEM_PROMPT)} chars)")
     except FileNotFoundError:
         print(f"ERROR: Kiosk prompt file not found: {KIOSK_PROMPT_FILE}")
-        print(f"  Please create the file or update KIOSK_PROMPT_FILE environment variable.")
+        print(f"  Please create the file or update prompt_file in kiosk.conf.")
         print(f"  The bot will run without a system prompt until this is fixed.")
     except PermissionError:
         print(f"ERROR: Permission denied reading kiosk prompt file: {KIOSK_PROMPT_FILE}")
