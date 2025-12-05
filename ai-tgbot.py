@@ -314,6 +314,7 @@ def get_reply(message, image_data_64, session_id):
     # print (f"has_image: {has_image}")
 
     model = session_data[session_id]["model_version"]
+    endpoint_url = None  # Track which endpoint is used for response logging
 
 
 
@@ -324,7 +325,8 @@ def get_reply(message, image_data_64, session_id):
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
-        log_debug("REQUEST", OPENAI_API_URL, payload)
+        endpoint_url = OPENAI_API_URL
+        log_debug("REQUEST", endpoint_url, payload)
         raw_response = requests.post(
             OPENAI_API_URL,
             headers={
@@ -342,7 +344,8 @@ def get_reply(message, image_data_64, session_id):
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
-        log_debug("REQUEST", OPENROUTER_API_URL, payload)
+        endpoint_url = OPENROUTER_API_URL
+        log_debug("REQUEST", endpoint_url, payload)
         raw_response = requests.post(
             OPENROUTER_API_URL,
             headers={
@@ -387,7 +390,8 @@ def get_reply(message, image_data_64, session_id):
 
             anthropic_payload["messages"].append(anthropic_message)
 
-        log_debug("REQUEST", ANTHROPIC_API_URL, anthropic_payload)
+        endpoint_url = ANTHROPIC_API_URL
+        log_debug("REQUEST", endpoint_url, anthropic_payload)
         raw_response = requests.post(
             ANTHROPIC_API_URL,
             headers={
@@ -423,7 +427,8 @@ def get_reply(message, image_data_64, session_id):
             
         groq_payload["messages"] = groq_messages
         
-        log_debug("REQUEST", GROQ_API_URL, groq_payload)
+        endpoint_url = GROQ_API_URL
+        log_debug("REQUEST", endpoint_url, groq_payload)
         raw_response = requests.post(
             GROQ_API_URL,
             headers={
@@ -437,7 +442,7 @@ def get_reply(message, image_data_64, session_id):
     raw_json = raw_response.json()
     
     # Log the response with truncated values
-    log_debug("RESPONSE", model, raw_json)
+    log_debug("RESPONSE", endpoint_url, raw_json)
 
     def truncate_json(obj, max_length=500):
         if isinstance(obj, dict):
