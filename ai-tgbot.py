@@ -17,6 +17,59 @@ import hashlib
 from datetime import datetime
 import time
 import configparser
+import logging
+
+# Configure debug logging for LLM requests/responses
+DEBUG_LOG_FILE = os.environ.get('DEBUG_LOG_FILE', 'llm_debug.log')
+DEBUG_LOG_ENABLED = os.environ.get('DEBUG_LOG_ENABLED', 'true').lower() == 'true'
+
+# Set up a dedicated logger for debug logging
+debug_logger = logging.getLogger('llm_debug')
+debug_logger.setLevel(logging.DEBUG)
+
+if DEBUG_LOG_ENABLED:
+    # Create file handler for debug logging
+    file_handler = logging.FileHandler(DEBUG_LOG_FILE, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    # Create formatter with timestamp
+    formatter = logging.Formatter('%(asctime)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    debug_logger.addHandler(file_handler)
+    print(f"Debug logging enabled: {DEBUG_LOG_FILE}")
+
+
+def truncate_for_debug(obj, max_length=15):
+    """
+    Truncate JSON values for debug logging.
+    Preserves all keys but truncates string values to max_length characters.
+    """
+    if isinstance(obj, dict):
+        return {k: truncate_for_debug(v, max_length) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [truncate_for_debug(v, max_length) for v in obj]
+    elif isinstance(obj, str):
+        if len(obj) > max_length:
+            return obj[:max_length] + "..."
+        return obj
+    else:
+        return obj
+
+
+def log_debug(direction, endpoint, data):
+    """
+    Log request/response data to the debug log file.
+    
+    Args:
+        direction: "REQUEST" or "RESPONSE"
+        endpoint: The API endpoint URL
+        data: The JSON data to log (will be truncated)
+    """
+    if not DEBUG_LOG_ENABLED:
+        return
+    
+    truncated_data = truncate_for_debug(data)
+    log_entry = f"{direction} to {endpoint}:\n{json.dumps(truncated_data, indent=2)}"
+    debug_logger.debug(log_entry)
 
 # Get the API keys from the environment variables
 API_KEY = os.environ.get('API_KEY')
@@ -271,6 +324,7 @@ def get_reply(message, image_data_64, session_id):
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
+        log_debug("REQUEST", OPENAI_API_URL, payload)
         raw_response = requests.post(
             OPENAI_API_URL,
             headers={
@@ -288,6 +342,7 @@ def get_reply(message, image_data_64, session_id):
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
+        log_debug("REQUEST", OPENROUTER_API_URL, payload)
         raw_response = requests.post(
             OPENROUTER_API_URL,
             headers={
@@ -332,6 +387,7 @@ def get_reply(message, image_data_64, session_id):
 
             anthropic_payload["messages"].append(anthropic_message)
 
+        log_debug("REQUEST", ANTHROPIC_API_URL, anthropic_payload)
         raw_response = requests.post(
             ANTHROPIC_API_URL,
             headers={
@@ -367,6 +423,7 @@ def get_reply(message, image_data_64, session_id):
             
         groq_payload["messages"] = groq_messages
         
+        log_debug("REQUEST", GROQ_API_URL, groq_payload)
         raw_response = requests.post(
             GROQ_API_URL,
             headers={
@@ -378,6 +435,9 @@ def get_reply(message, image_data_64, session_id):
 
     # Handle the response
     raw_json = raw_response.json()
+    
+    # Log the response with truncated values
+    log_debug("RESPONSE", model, raw_json)
 
     def truncate_json(obj, max_length=500):
         if isinstance(obj, dict):
