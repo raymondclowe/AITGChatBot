@@ -160,3 +160,8 @@ cython_debug/
 #.idea/
 .vscode/launch.json
 .aider*
+
+# Debug log files and logs directory
+logs/
+llm_debug.log
+*.debug.log

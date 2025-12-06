@@ -17,6 +17,82 @@ import hashlib
 from datetime import datetime
 import time
 import configparser
+import logging
+import argparse
+
+# Parse command line arguments for debug logging configuration
+parser = argparse.ArgumentParser(description='AI Telegram Chat Bot')
+parser.add_argument('--debug-log-file', type=str, default=None,
+                    help='Path to the debug log file (default: ./logs/llm_debug.log)')
+parser.add_argument('--debug-log-disabled', action='store_true',
+                    help='Disable debug logging')
+args, _ = parser.parse_known_args()
+
+# Configure debug logging for LLM requests/responses
+# Priority: command line args > environment variables > defaults
+# Default location is ./logs/llm_debug.log (creates logs/ directory if needed)
+DEFAULT_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+DEFAULT_LOG_FILE = os.path.join(DEFAULT_LOG_DIR, 'llm_debug.log')
+
+DEBUG_LOG_FILE = args.debug_log_file or os.environ.get('DEBUG_LOG_FILE', DEFAULT_LOG_FILE)
+DEBUG_LOG_ENABLED = not args.debug_log_disabled and os.environ.get('DEBUG_LOG_ENABLED', 'true').lower() == 'true'
+
+# Set up a dedicated logger for debug logging
+debug_logger = logging.getLogger('llm_debug')
+debug_logger.setLevel(logging.DEBUG)
+
+if DEBUG_LOG_ENABLED:
+    try:
+        # Create the log directory if it doesn't exist
+        log_dir = os.path.dirname(DEBUG_LOG_FILE)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        
+        # Create file handler for debug logging
+        file_handler = logging.FileHandler(DEBUG_LOG_FILE, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        # Create formatter with timestamp
+        formatter = logging.Formatter('%(asctime)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        debug_logger.addHandler(file_handler)
+        print(f"Debug logging enabled: {DEBUG_LOG_FILE}")
+    except OSError as e:
+        print(f"Warning: Could not set up debug logging to {DEBUG_LOG_FILE}: {e}")
+        DEBUG_LOG_ENABLED = False
+
+
+def truncate_for_debug(obj, max_length=15):
+    """
+    Truncate JSON values for debug logging.
+    Preserves all keys but truncates string values to max_length characters.
+    """
+    if isinstance(obj, dict):
+        return {k: truncate_for_debug(v, max_length) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [truncate_for_debug(v, max_length) for v in obj]
+    elif isinstance(obj, str):
+        if len(obj) > max_length:
+            return obj[:max_length] + "..."
+        return obj
+    else:
+        return obj
+
+
+def log_debug(direction, endpoint, data):
+    """
+    Log request/response data to the debug log file.
+    
+    Args:
+        direction: "REQUEST" or "RESPONSE"
+        endpoint: The API endpoint URL
+        data: The JSON data to log (will be truncated)
+    """
+    if not DEBUG_LOG_ENABLED:
+        return
+    
+    truncated_data = truncate_for_debug(data)
+    log_entry = f"{direction} to {endpoint}:\n{json.dumps(truncated_data, indent=2)}"
+    debug_logger.debug(log_entry)
 
 # Get the API keys from the environment variables
 API_KEY = os.environ.get('API_KEY')
@@ -261,6 +337,7 @@ def get_reply(message, image_data_64, session_id):
     # print (f"has_image: {has_image}")
 
     model = session_data[session_id]["model_version"]
+    endpoint_url = None  # Track which endpoint is used for response logging
 
 
 
@@ -271,6 +348,8 @@ def get_reply(message, image_data_64, session_id):
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
+        endpoint_url = OPENAI_API_URL
+        log_debug("REQUEST", endpoint_url, payload)
         raw_response = requests.post(
             OPENAI_API_URL,
             headers={
@@ -288,6 +367,8 @@ def get_reply(message, image_data_64, session_id):
             "messages": session_data[session_id]["CONVERSATION"],
         }
 
+        endpoint_url = OPENROUTER_API_URL
+        log_debug("REQUEST", endpoint_url, payload)
         raw_response = requests.post(
             OPENROUTER_API_URL,
             headers={
@@ -332,6 +413,8 @@ def get_reply(message, image_data_64, session_id):
 
             anthropic_payload["messages"].append(anthropic_message)
 
+        endpoint_url = ANTHROPIC_API_URL
+        log_debug("REQUEST", endpoint_url, anthropic_payload)
         raw_response = requests.post(
             ANTHROPIC_API_URL,
             headers={
@@ -367,6 +450,8 @@ def get_reply(message, image_data_64, session_id):
             
         groq_payload["messages"] = groq_messages
         
+        endpoint_url = GROQ_API_URL
+        log_debug("REQUEST", endpoint_url, groq_payload)
         raw_response = requests.post(
             GROQ_API_URL,
             headers={
@@ -378,6 +463,9 @@ def get_reply(message, image_data_64, session_id):
 
     # Handle the response
     raw_json = raw_response.json()
+    
+    # Log the response with truncated values
+    log_debug("RESPONSE", endpoint_url, raw_json)
 
     def truncate_json(obj, max_length=500):
         if isinstance(obj, dict):
