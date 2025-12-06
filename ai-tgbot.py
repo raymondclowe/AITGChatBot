@@ -18,24 +18,47 @@ from datetime import datetime
 import time
 import configparser
 import logging
+import argparse
+
+# Parse command line arguments for debug logging configuration
+parser = argparse.ArgumentParser(description='AI Telegram Chat Bot')
+parser.add_argument('--debug-log-file', type=str, default=None,
+                    help='Path to the debug log file (default: ./logs/llm_debug.log)')
+parser.add_argument('--debug-log-disabled', action='store_true',
+                    help='Disable debug logging')
+args, _ = parser.parse_known_args()
 
 # Configure debug logging for LLM requests/responses
-DEBUG_LOG_FILE = os.environ.get('DEBUG_LOG_FILE', 'llm_debug.log')
-DEBUG_LOG_ENABLED = os.environ.get('DEBUG_LOG_ENABLED', 'true').lower() == 'true'
+# Priority: command line args > environment variables > defaults
+# Default location is ./logs/llm_debug.log (creates logs/ directory if needed)
+DEFAULT_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+DEFAULT_LOG_FILE = os.path.join(DEFAULT_LOG_DIR, 'llm_debug.log')
+
+DEBUG_LOG_FILE = args.debug_log_file or os.environ.get('DEBUG_LOG_FILE', DEFAULT_LOG_FILE)
+DEBUG_LOG_ENABLED = not args.debug_log_disabled and os.environ.get('DEBUG_LOG_ENABLED', 'true').lower() == 'true'
 
 # Set up a dedicated logger for debug logging
 debug_logger = logging.getLogger('llm_debug')
 debug_logger.setLevel(logging.DEBUG)
 
 if DEBUG_LOG_ENABLED:
-    # Create file handler for debug logging
-    file_handler = logging.FileHandler(DEBUG_LOG_FILE, encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)
-    # Create formatter with timestamp
-    formatter = logging.Formatter('%(asctime)s - %(message)s')
-    file_handler.setFormatter(formatter)
-    debug_logger.addHandler(file_handler)
-    print(f"Debug logging enabled: {DEBUG_LOG_FILE}")
+    try:
+        # Create the log directory if it doesn't exist
+        log_dir = os.path.dirname(DEBUG_LOG_FILE)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        
+        # Create file handler for debug logging
+        file_handler = logging.FileHandler(DEBUG_LOG_FILE, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        # Create formatter with timestamp
+        formatter = logging.Formatter('%(asctime)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        debug_logger.addHandler(file_handler)
+        print(f"Debug logging enabled: {DEBUG_LOG_FILE}")
+    except OSError as e:
+        print(f"Warning: Could not set up debug logging to {DEBUG_LOG_FILE}: {e}")
+        DEBUG_LOG_ENABLED = False
 
 
 def truncate_for_debug(obj, max_length=15):
