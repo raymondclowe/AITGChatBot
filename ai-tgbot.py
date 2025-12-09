@@ -892,11 +892,12 @@ def long_polling():
 
             # Parse and validate response
             response_data = response.json()
-            if not response_data.get('result'):
+            result_list = response_data.get('result', [])
+            if not result_list:
                 continue
 
             # Get the latest message and update the offset
-            latest_message = response_data['result'][-1]
+            latest_message = result_list[-1]
             offset = latest_message['update_id'] + 1
 
 
