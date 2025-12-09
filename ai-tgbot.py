@@ -890,9 +890,14 @@ def long_polling():
             # presume the response is json and pretty print it with nice colors and formatting
             # print(response.json(), indent=4, sort_dicts=False)
 
-            # If there is no response then continue the loop
-            if not response.json()['result']:
+            # Parse and validate response
+            response_data = response.json()
+            if not response_data.get('result'):
                 continue
+
+            # Get the latest message and update the offset
+            latest_message = response_data['result'][-1]
+            offset = latest_message['update_id'] + 1
 
 
         except Exception as e:
@@ -900,10 +905,6 @@ def long_polling():
             continue
 
         try:
-
-            # Get the latest message and update the offset
-            latest_message = response.json()['result'][-1]
-            offset = latest_message['update_id'] + 1
 
             # Check if we have a message or callback query
             if 'message' in latest_message:
