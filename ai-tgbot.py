@@ -22,6 +22,13 @@ import argparse
 import signal
 import sys
 
+# Network exception types for consistent error handling
+NETWORK_EXCEPTIONS = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.RequestException
+)
+
 # Global flag for graceful shutdown
 shutdown_requested = False
 
@@ -420,7 +427,7 @@ def get_reply(message, image_data_64, session_id):
                             image_response = requests.get(image_url, timeout=30)
                             image_response.raise_for_status()
                             image_data_64 = base64.b64encode(image_response.content).decode("utf-8")
-                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                        except NETWORK_EXCEPTIONS as e:
                             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading image from URL: {e}")
                             continue  # Skip this image if download fails
 
@@ -730,7 +737,7 @@ def download_image(file_path):
             response = requests.get(file_url, timeout=60)  # Timeout for image download
             response.raise_for_status()
             return response.content
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+        except NETWORK_EXCEPTIONS as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading image (attempt {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
@@ -765,7 +772,7 @@ def list_openrouter_models_as_message():
             model_list += "\n\n📷 = Image input (vision analysis)\n🎨 = Image output (generation)\n"
             model_list += "Or choose from the best ranked at https://openrouter.ai/rankings"
             return model_list
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+        except NETWORK_EXCEPTIONS as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error fetching OpenRouter models (attempt {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
@@ -786,7 +793,7 @@ def list_openrouter_models_as_list():
             for model in openRouterModelList:
                 model_list.append(model['id'])
             return model_list
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+        except NETWORK_EXCEPTIONS as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error fetching OpenRouter models list (attempt {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
@@ -845,7 +852,7 @@ def get_openrouter_model_capabilities():
         # Fallback: pattern matching if API fails
         return get_openrouter_capabilities_fallback()
         
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+    except NETWORK_EXCEPTIONS as e:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error fetching model capabilities: {e}")
         return get_openrouter_capabilities_fallback()
     except Exception as e:
@@ -896,7 +903,7 @@ def get_openrouter_capabilities_fallback():
                     }
                 
                 return capabilities
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+    except NETWORK_EXCEPTIONS as e:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error in fallback pattern matching: {e}")
     except Exception as e:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in fallback pattern matching: {e}")
@@ -1008,7 +1015,7 @@ def long_polling():
                         requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
                             "callback_query_id": callback_query['id']
                         }, timeout=30)
-                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                    except NETWORK_EXCEPTIONS as e:
                         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error answering callback query: {e}")
                     continue
                 
@@ -1030,7 +1037,7 @@ def long_polling():
                     requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
                         "callback_query_id": callback_query['id']
                     }, timeout=30)
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                except NETWORK_EXCEPTIONS as e:
                     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error answering callback query: {e}")
                 continue
             else:
@@ -1054,7 +1061,7 @@ def long_polling():
                             message_text += additional_latest_message['message']['text']
                             offset = additional_latest_message['update_id'] + 1
                             # after having got this additional text we loop because there might be more
-                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                    except NETWORK_EXCEPTIONS as e:
                         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting additional message text: {e}")
                         break  # Stop trying to get additional messages on error
 
@@ -1270,7 +1277,7 @@ def long_polling():
                         file_info = file_info_response.json()
                         file_path = file_info['result']['file_path']
                         break  # Success
-                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                    except NETWORK_EXCEPTIONS as e:
                         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting file info (attempt {attempt + 1}/{max_retries}): {e}")
                         if attempt < max_retries - 1:
                             time.sleep(2 ** attempt)
@@ -1350,7 +1357,7 @@ def send_message(chat_id, text, reply_markup=None):
                         continue
                 else:
                     return  # Success, exit the function
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+            except NETWORK_EXCEPTIONS as e:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error sending message (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)  # Exponential backoff
@@ -1435,7 +1442,7 @@ def send_image_to_telegram(chat_id, image_data, mime_type):
             else:
                 return  # Success
                     
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+        except NETWORK_EXCEPTIONS as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error sending image (attempt {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
@@ -1450,7 +1457,8 @@ def send_image_to_telegram(chat_id, image_data, mime_type):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send image after {max_retries} attempts")
     try:
         send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed due to network issues.")
-    except:
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send fallback message: {e}")
         pass  # Even the fallback failed, but don't crash
 
 
