@@ -864,45 +864,44 @@ def get_openrouter_capabilities_fallback():
     try:
         response = requests.get('https://openrouter.ai/api/v1/models', timeout=30)
         response.raise_for_status()
-        if response.status_code == 200:
-            models_data = response.json()
-            capabilities = {}
-            
-            if 'data' in models_data:
-                for model in models_data['data']:
-                    model_id = model['id']
-                    model_name = model.get('name', '').lower()
-                    model_desc = model.get('description', '').lower()
-                    
-                    # Pattern matching for vision capabilities
-                    vision_patterns = ['vision', 'image', 'multimodal', 'visual', 'photo', 'picture']
-                    image_gen_patterns = ['image-preview', 'generate', 'creation']
-                    
-                    # Check for vision in name, description, or known model patterns
-                    has_vision = (
-                        any(pattern in model_name for pattern in vision_patterns) or
-                        any(pattern in model_desc for pattern in vision_patterns) or
-                        any(pattern in model_id.lower() for pattern in [
-                            'gpt-4o', 'gpt-4-vision', 'gpt-4-turbo', 'claude-3', 'gemini', 
-                            'llava', 'cogvlm', 'qwen-vl', 'internvl', 'minicpm-v'
-                        ])
-                    )
-                    
-                    has_image_gen = (
-                        any(pattern in model_id.lower() for pattern in image_gen_patterns) or
-                        'image-preview' in model_id.lower()
-                    )
-                    
-                    capabilities[model_id] = {
-                        'name': model.get('name', model_id),
-                        'description': model.get('description', ''),
-                        'image_input': has_vision,
-                        'image_output': has_image_gen,
-                        'context_length': model.get('context_length', 0),
-                        'pricing': model.get('pricing', {})
-                    }
+        models_data = response.json()
+        capabilities = {}
+        
+        if 'data' in models_data:
+            for model in models_data['data']:
+                model_id = model['id']
+                model_name = model.get('name', '').lower()
+                model_desc = model.get('description', '').lower()
                 
-                return capabilities
+                # Pattern matching for vision capabilities
+                vision_patterns = ['vision', 'image', 'multimodal', 'visual', 'photo', 'picture']
+                image_gen_patterns = ['image-preview', 'generate', 'creation']
+                
+                # Check for vision in name, description, or known model patterns
+                has_vision = (
+                    any(pattern in model_name for pattern in vision_patterns) or
+                    any(pattern in model_desc for pattern in vision_patterns) or
+                    any(pattern in model_id.lower() for pattern in [
+                        'gpt-4o', 'gpt-4-vision', 'gpt-4-turbo', 'claude-3', 'gemini', 
+                        'llava', 'cogvlm', 'qwen-vl', 'internvl', 'minicpm-v'
+                    ])
+                )
+                
+                has_image_gen = (
+                    any(pattern in model_id.lower() for pattern in image_gen_patterns) or
+                    'image-preview' in model_id.lower()
+                )
+                
+                capabilities[model_id] = {
+                    'name': model.get('name', model_id),
+                    'description': model.get('description', ''),
+                    'image_input': has_vision,
+                    'image_output': has_image_gen,
+                    'context_length': model.get('context_length', 0),
+                    'pricing': model.get('pricing', {})
+                }
+            
+            return capabilities
     except NETWORK_EXCEPTIONS as e:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error in fallback pattern matching: {e}")
     except Exception as e:
