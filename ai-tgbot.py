@@ -372,6 +372,7 @@ def get_reply(message, image_data_64, session_id):
                 "Authorization": f"Bearer {API_KEY}",
             },
             json=payload,
+            timeout=120  # 2 minute timeout for LLM API calls
         )
     elif model.startswith("openrouter"):
         # if an openrouter model then strip of the string "openrouter:" from the beginning
@@ -393,6 +394,7 @@ def get_reply(message, image_data_64, session_id):
                 "X-Title": "AITGChatBot",
             },
             json=payload,
+            timeout=120  # 2 minute timeout for LLM API calls
         )
 
     elif model.startswith("claud"):
@@ -443,6 +445,7 @@ def get_reply(message, image_data_64, session_id):
                 "content-type": "application/json",
             },
             json=anthropic_payload,
+            timeout=120  # 2 minute timeout for LLM API calls
         )
 
     elif model.startswith("llama3"):
@@ -478,7 +481,8 @@ def get_reply(message, image_data_64, session_id):
                 "Authorization": "Bearer " + GROQ_API_KEY,                
                 "content-type": "application/json",
             },
-            json=groq_payload
+            json=groq_payload,
+            timeout=120  # 2 minute timeout for LLM API calls
         )
 
     # Handle the response
