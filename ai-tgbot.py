@@ -414,8 +414,13 @@ def get_reply(message, image_data_64, session_id):
                         image_data_64 = image_url[len("data:image/jpeg;base64,"):]
                     else:
                         # If the image URL is not base64-encoded, you'll need to fetch and encode it
-                        image_response = requests.get(image_url)
-                        image_data_64 = base64.b64encode(image_response.content).decode("utf-8")
+                        try:
+                            image_response = requests.get(image_url, timeout=30)
+                            image_response.raise_for_status()
+                            image_data_64 = base64.b64encode(image_response.content).decode("utf-8")
+                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading image from URL: {e}")
+                            continue  # Skip this image if download fails
 
                     anthropic_message["content"].append({
                         "type": "image",
@@ -714,42 +719,76 @@ def get_reply(message, image_data_64, session_id):
 
 # Function to download the image given the file path
 def download_image(file_path):
-    file_url = f"https://api.telegram.org/file/bot{BOT_KEY}/{file_path}"
-    response = requests.get(file_url, timeout=60)  # Timeout for image download
-    return response.content
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            file_url = f"https://api.telegram.org/file/bot{BOT_KEY}/{file_path}"
+            response = requests.get(file_url, timeout=60)  # Timeout for image download
+            response.raise_for_status()
+            return response.content
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading image (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download image after {max_retries} attempts")
+                return None
 
 
 # get list from https://openrouter.ai/api/v1/models
 def list_openrouter_models_as_message():
-    response = requests.get(f"https://openrouter.ai/api/v1/models")
-    openRouterModelList = response.json()['data']
-    capabilities = get_openrouter_model_capabilities()
-    
-    model_list = "Model ID : Model Name : Image Input : Image Output\n\n"
-    for model in openRouterModelList:  # include id, name, and image capabilities
-        model_id = model['id']
-        model_name = model['name']
-        caps = capabilities.get(model_id, {})
-        
-        # Image capability indicators
-        img_in = "📷 Yes" if caps.get('image_input', False) else "No"
-        img_out = "🎨 Yes" if caps.get('image_output', False) else "No"
-        
-        model_list += f"{model_id} : {model_name} : {img_in} : {img_out}\n"
-    
-    model_list += "\n\n📷 = Image input (vision analysis)\n🎨 = Image output (generation)\n"
-    model_list += "Or choose from the best ranked at https://openrouter.ai/rankings"
-    return model_list
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(f"https://openrouter.ai/api/v1/models", timeout=30)
+            response.raise_for_status()
+            openRouterModelList = response.json()['data']
+            capabilities = get_openrouter_model_capabilities()
+            
+            model_list = "Model ID : Model Name : Image Input : Image Output\n\n"
+            for model in openRouterModelList:  # include id, name, and image capabilities
+                model_id = model['id']
+                model_name = model['name']
+                caps = capabilities.get(model_id, {})
+                
+                # Image capability indicators
+                img_in = "📷 Yes" if caps.get('image_input', False) else "No"
+                img_out = "🎨 Yes" if caps.get('image_output', False) else "No"
+                
+                model_list += f"{model_id} : {model_name} : {img_in} : {img_out}\n"
+            
+            model_list += "\n\n📷 = Image input (vision analysis)\n🎨 = Image output (generation)\n"
+            model_list += "Or choose from the best ranked at https://openrouter.ai/rankings"
+            return model_list
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error fetching OpenRouter models (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                return "⚠️ Failed to fetch model list due to network issues. Please try again later."
 
 
 # get list from https://openrouter.ai/api/v1/models
 def list_openrouter_models_as_list():
-    response = requests.get(f"https://openrouter.ai/api/v1/models")
-    openRouterModelList = response.json()['data']
-    model_list = []
-    for model in openRouterModelList:
-        model_list.append(model['id'])
-    return model_list
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(f"https://openrouter.ai/api/v1/models", timeout=30)
+            response.raise_for_status()
+            openRouterModelList = response.json()['data']
+            model_list = []
+            for model in openRouterModelList:
+                model_list.append(model['id'])
+            return model_list
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error fetching OpenRouter models list (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                return []  # Return empty list on failure
 
 # Cache for model capabilities
 _model_capabilities_cache = None
@@ -773,7 +812,7 @@ def get_openrouter_model_capabilities():
         if api_key:
             headers['Authorization'] = f'Bearer {api_key}'
             
-        response = requests.get('https://openrouter.ai/api/v1/models', headers=headers)
+        response = requests.get('https://openrouter.ai/api/v1/models', headers=headers, timeout=30)
         
         if response.status_code == 200:
             models_data = response.json()
@@ -802,14 +841,18 @@ def get_openrouter_model_capabilities():
         # Fallback: pattern matching if API fails
         return get_openrouter_capabilities_fallback()
         
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error fetching model capabilities: {e}")
+        return get_openrouter_capabilities_fallback()
     except Exception as e:
-        print(f"Error fetching model capabilities: {e}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error fetching model capabilities: {e}")
         return get_openrouter_capabilities_fallback()
 
 def get_openrouter_capabilities_fallback():
     """Fallback to pattern matching when API is unavailable"""
     try:
-        response = requests.get('https://openrouter.ai/api/v1/models')
+        response = requests.get('https://openrouter.ai/api/v1/models', timeout=30)
+        response.raise_for_status()
         if response.status_code == 200:
             models_data = response.json()
             capabilities = {}
@@ -849,8 +892,10 @@ def get_openrouter_capabilities_fallback():
                     }
                 
                 return capabilities
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error in fallback pattern matching: {e}")
     except Exception as e:
-        print(f"Error in fallback pattern matching: {e}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in fallback pattern matching: {e}")
     
     return {}
 
@@ -879,6 +924,9 @@ def get_matching_models(substring):
 # Long polling loop
 def long_polling():
     offset = 0
+    consecutive_errors = 0
+    max_backoff = 300  # Maximum backoff time in seconds (5 minutes)
+    
     while not shutdown_requested:
         try:
             # Long polling request to get new messages with timeout
@@ -886,6 +934,9 @@ def long_polling():
                 f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=100&offset={offset}",
                 timeout=120  # Add timeout to prevent hanging (100s server timeout + 20s buffer)
             )
+            
+            # Check for HTTP errors
+            response.raise_for_status()
 
             # presume the response is json and pretty print it with nice colors and formatting
             # print(response.json(), indent=4, sort_dicts=False)
@@ -894,15 +945,44 @@ def long_polling():
             response_data = response.json()
             result_list = response_data.get('result', [])
             if not result_list:
+                # Reset error counter on successful empty response
+                consecutive_errors = 0
                 continue
 
             # Get the latest message and update the offset
             latest_message = result_list[-1]
             offset = latest_message['update_id'] + 1
+            
+            # Reset error counter on successful message retrieval
+            consecutive_errors = 0
 
-
+        except requests.exceptions.Timeout as e:
+            consecutive_errors += 1
+            backoff_time = min(2 ** consecutive_errors, max_backoff)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Timeout getting updates (attempt {consecutive_errors}): {e}")
+            print(f"Waiting {backoff_time} seconds before retry...")
+            time.sleep(backoff_time)
+            continue
+        except requests.exceptions.ConnectionError as e:
+            consecutive_errors += 1
+            backoff_time = min(2 ** consecutive_errors, max_backoff)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network connection error (attempt {consecutive_errors}): {e}")
+            print(f"Waiting {backoff_time} seconds before retry...")
+            time.sleep(backoff_time)
+            continue
+        except requests.exceptions.RequestException as e:
+            consecutive_errors += 1
+            backoff_time = min(2 ** consecutive_errors, max_backoff)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Request error (attempt {consecutive_errors}): {e}")
+            print(f"Waiting {backoff_time} seconds before retry...")
+            time.sleep(backoff_time)
+            continue
         except Exception as e:
-            print(f"Error getting response on line {e.__traceback__.tb_lineno}: {e}")
+            consecutive_errors += 1
+            backoff_time = min(2 ** consecutive_errors, max_backoff)
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting response on line {e.__traceback__.tb_lineno} (attempt {consecutive_errors}): {e}")
+            print(f"Waiting {backoff_time} seconds before retry...")
+            time.sleep(backoff_time)
             continue
 
         try:
@@ -920,9 +1000,12 @@ def long_polling():
                 # Block model changes in kiosk mode
                 if KIOSK_MODE:
                     send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
-                    requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
-                        "callback_query_id": callback_query['id']
-                    })
+                    try:
+                        requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
+                            "callback_query_id": callback_query['id']
+                        }, timeout=30)
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error answering callback query: {e}")
                     continue
                 
                 # Update the model version
@@ -939,9 +1022,12 @@ def long_polling():
                 send_message(chat_id, full_msg)
                 
                 # Acknowledge the callback query
-                requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
-                    "callback_query_id": callback_query['id']
-                })
+                try:
+                    requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
+                        "callback_query_id": callback_query['id']
+                    }, timeout=30)
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error answering callback query: {e}")
                 continue
             else:
                 continue
@@ -951,17 +1037,22 @@ def long_polling():
             if len(message_text) > 3000:
                 # fast loop to look for any additional messages, down side of this is it adds at least one second
                 while True:
-                    additional_response = requests.get(
-                        f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=1&offset={offset}",
-                        timeout=5  # Short timeout for additional message check
-                    )
-                    if not additional_response.json()['result']:
-                        break
-                    else:
-                        additional_latest_message = additional_response.json()['result'][-1]
-                        message_text += additional_latest_message['message']['text']
-                        offset = additional_latest_message['update_id'] + 1
-                        # after having got this additional text we loop because there might be more
+                    try:
+                        additional_response = requests.get(
+                            f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=1&offset={offset}",
+                            timeout=5  # Short timeout for additional message check
+                        )
+                        additional_response.raise_for_status()
+                        if not additional_response.json()['result']:
+                            break
+                        else:
+                            additional_latest_message = additional_response.json()['result'][-1]
+                            message_text += additional_latest_message['message']['text']
+                            offset = additional_latest_message['update_id'] + 1
+                            # after having got this additional text we loop because there might be more
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting additional message text: {e}")
+                        break  # Stop trying to get additional messages on error
 
 
             # check in the session data if there is a key with this chat_id, if not then initialize an empty one
@@ -1162,22 +1253,39 @@ def long_polling():
                         break
                     
             if message_photo:
-                # Retrieve the file path of the image
-                file_info_response = requests.get(
-                    f"https://api.telegram.org/bot{BOT_KEY}/getFile?file_id={message_photo}",
-                    timeout=30  # Timeout for file info request
-                )
-                file_info = file_info_response.json()
-                file_path = file_info['result']['file_path']
-
-                # Download the image
-                image_data = download_image(file_path)
+                # Retrieve the file path of the image with retry logic
+                max_retries = 3
+                file_path = None
+                for attempt in range(max_retries):
+                    try:
+                        file_info_response = requests.get(
+                            f"https://api.telegram.org/bot{BOT_KEY}/getFile?file_id={message_photo}",
+                            timeout=30  # Timeout for file info request
+                        )
+                        file_info_response.raise_for_status()
+                        file_info = file_info_response.json()
+                        file_path = file_info['result']['file_path']
+                        break  # Success
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting file info (attempt {attempt + 1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            time.sleep(2 ** attempt)
+                            continue
+                        else:
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to get file info after {max_retries} attempts")
                 
-                # Base64 encode the image data
-                if image_data is not None:
-                    image_data_base64 = base64.b64encode(image_data).decode('utf-8')
+                # Download the image only if we got the file path
+                if file_path:
+                    image_data = download_image(file_path)
+                    
+                    # Base64 encode the image data
+                    if image_data is not None:
+                        image_data_base64 = base64.b64encode(image_data).decode('utf-8')
+                    else:
+                        image_data_base64 = None
+                        send_message(chat_id, "⚠️ Failed to download the image due to network issues. Please try again.")
                 else:
-                    image_data_base64 = None
+                    send_message(chat_id, "⚠️ Failed to retrieve image information due to network issues. Please try again.")
 
             if 'caption' in latest_message['message']:
                 # If the message has a caption, get the caption text
@@ -1219,11 +1327,33 @@ def send_message(chat_id, text, reply_markup=None):
             message_data["reply_markup"] = reply_markup
         print(f'message_data {message_data} ')
     #    print(message_data)
-        response = requests.post(f"https://api.telegram.org/bot{BOT_KEY}/sendMessage", json=message_data)
-        # For error cases, you might want to check if the request was successful:
-        if not response.ok:
-            # Print the reason for the error status code
-            print(f"Error Reason: {response.reason}")
+        
+        # Retry logic for sending messages
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    f"https://api.telegram.org/bot{BOT_KEY}/sendMessage", 
+                    json=message_data,
+                    timeout=30  # Add timeout for send operations
+                )
+                # For error cases, you might want to check if the request was successful:
+                if not response.ok:
+                    # Print the reason for the error status code
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error sending message (attempt {attempt + 1}/{max_retries}): {response.reason}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                else:
+                    return  # Success, exit the function
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error sending message (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                else:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send message after {max_retries} attempts")
+                    return
 
 
     while text:
@@ -1245,55 +1375,79 @@ def send_message(chat_id, text, reply_markup=None):
 
 def send_image_to_telegram(chat_id, image_data, mime_type):
     """Send an image to Telegram"""
-    try:
-        # Determine file extension from MIME type
-        ext_map = {
-            'image/jpeg': 'jpg',
-            'image/jpg': 'jpg', 
-            'image/png': 'png',
-            'image/gif': 'gif',
-            'image/webp': 'webp'
-        }
-        ext = ext_map.get(mime_type, 'jpg')
-        
-        # Prepare the photo data
-        files = {
-            'photo': (f'generated_image.{ext}', image_data, mime_type)
-        }
-        data = {
-            'chat_id': chat_id,
-            'caption': f'Generated image ({len(image_data)} bytes, {mime_type})'
-        }
-        
-        # Send the photo
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_KEY}/sendPhoto",
-            files=files,
-            data=data
-        )
-        
-        if not response.ok:
-            print(f"Error sending image: {response.reason}")
-            # Fallback: send as document if photo fails
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Determine file extension from MIME type
+            ext_map = {
+                'image/jpeg': 'jpg',
+                'image/jpg': 'jpg', 
+                'image/png': 'png',
+                'image/gif': 'gif',
+                'image/webp': 'webp'
+            }
+            ext = ext_map.get(mime_type, 'jpg')
+            
+            # Prepare the photo data
             files = {
-                'document': (f'generated_image.{ext}', image_data, mime_type)
+                'photo': (f'generated_image.{ext}', image_data, mime_type)
             }
             data = {
                 'chat_id': chat_id,
                 'caption': f'Generated image ({len(image_data)} bytes, {mime_type})'
             }
+            
+            # Send the photo
             response = requests.post(
-                f"https://api.telegram.org/bot{BOT_KEY}/sendDocument",
+                f"https://api.telegram.org/bot{BOT_KEY}/sendPhoto",
                 files=files,
-                data=data
+                data=data,
+                timeout=60  # Longer timeout for image uploads
             )
+            
             if not response.ok:
-                print(f"Error sending image as document: {response.reason}")
-                
-    except Exception as e:
-        print(f"Exception sending image: {e}")
-        # Send text message as fallback
-        send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed.")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error sending image (attempt {attempt + 1}/{max_retries}): {response.reason}")
+                # Fallback: send as document if photo fails
+                files = {
+                    'document': (f'generated_image.{ext}', image_data, mime_type)
+                }
+                data = {
+                    'chat_id': chat_id,
+                    'caption': f'Generated image ({len(image_data)} bytes, {mime_type})'
+                }
+                response = requests.post(
+                    f"https://api.telegram.org/bot{BOT_KEY}/sendDocument",
+                    files=files,
+                    data=data,
+                    timeout=60
+                )
+                if not response.ok:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error sending image as document: {response.reason}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                else:
+                    return  # Success
+            else:
+                return  # Success
+                    
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error sending image (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Exception sending image (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+    
+    # All retries failed - send text message as fallback
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send image after {max_retries} attempts")
+    try:
+        send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed due to network issues.")
+    except:
+        pass  # Even the fallback failed, but don't crash
 
 
 if __name__ == "__main__":
