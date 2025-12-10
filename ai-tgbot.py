@@ -19,6 +19,21 @@ import time
 import configparser
 import logging
 import argparse
+import signal
+import sys
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    global shutdown_requested
+    print(f"\nReceived signal {signum}, initiating graceful shutdown...")
+    shutdown_requested = True
+
+# Register signal handlers for graceful shutdown
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 # Parse command line arguments for debug logging configuration
 parser = argparse.ArgumentParser(description='AI Telegram Chat Bot')
@@ -700,7 +715,7 @@ def get_reply(message, image_data_64, session_id):
 # Function to download the image given the file path
 def download_image(file_path):
     file_url = f"https://api.telegram.org/file/bot{BOT_KEY}/{file_path}"
-    response = requests.get(file_url)
+    response = requests.get(file_url, timeout=60)  # Timeout for image download
     return response.content
 
 
@@ -864,17 +879,26 @@ def get_matching_models(substring):
 # Long polling loop
 def long_polling():
     offset = 0
-    while True:
+    while not shutdown_requested:
         try:
-            # Long polling request to get new messages
-            response = requests.get(f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=100&offset={offset}")
+            # Long polling request to get new messages with timeout
+            response = requests.get(
+                f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=100&offset={offset}",
+                timeout=120  # Add timeout to prevent hanging (100s server timeout + 20s buffer)
+            )
 
             # presume the response is json and pretty print it with nice colors and formatting
             # print(response.json(), indent=4, sort_dicts=False)
 
-            # If there is no response then continue the loop
-            if not response.json()['result']:
+            # Parse and validate response
+            response_data = response.json()
+            result_list = response_data.get('result', [])
+            if not result_list:
                 continue
+
+            # Get the latest message and update the offset
+            latest_message = result_list[-1]
+            offset = latest_message['update_id'] + 1
 
 
         except Exception as e:
@@ -882,10 +906,6 @@ def long_polling():
             continue
 
         try:
-
-            # Get the latest message and update the offset
-            latest_message = response.json()['result'][-1]
-            offset = latest_message['update_id'] + 1
 
             # Check if we have a message or callback query
             if 'message' in latest_message:
@@ -931,7 +951,10 @@ def long_polling():
             if len(message_text) > 3000:
                 # fast loop to look for any additional messages, down side of this is it adds at least one second
                 while True:
-                    additional_response = requests.get(f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=1&offset={offset}")
+                    additional_response = requests.get(
+                        f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=1&offset={offset}",
+                        timeout=5  # Short timeout for additional message check
+                    )
                     if not additional_response.json()['result']:
                         break
                     else:
@@ -1140,7 +1163,10 @@ def long_polling():
                     
             if message_photo:
                 # Retrieve the file path of the image
-                file_info_response = requests.get(f"https://api.telegram.org/bot{BOT_KEY}/getFile?file_id={message_photo}")
+                file_info_response = requests.get(
+                    f"https://api.telegram.org/bot{BOT_KEY}/getFile?file_id={message_photo}",
+                    timeout=30  # Timeout for file info request
+                )
                 file_info = file_info_response.json()
                 file_path = file_info['result']['file_path']
 
@@ -1270,7 +1296,19 @@ def send_image_to_telegram(chat_id, image_data, mime_type):
         send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed.")
 
 
-long_polling()
+if __name__ == "__main__":
+    try:
+        print("Starting AI Telegram Bot...")
+        print("Press Ctrl+C to stop gracefully")
+        long_polling()
+        print("Bot stopped gracefully.")
+    except KeyboardInterrupt:
+        print("\nKeyboardInterrupt received, shutting down...")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        sys.exit(1)
+    finally:
+        print("AI Telegram Bot shutdown complete.")
 
 
 ## Text for BotFather "commands", remove the "#" first
