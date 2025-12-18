@@ -18,3 +18,13 @@ prompt_file = kiosk_prompt_example.txt
 # Inactivity timeout in seconds (0 = disabled)
 # Automatically clears conversation after this period of inactivity
 inactivity_timeout = 3600
+
+[logging]
+# Chat logging level: off, minimum (text only), extended (text + attachments)
+# Default: off (no logging)
+log_chats = off
+
+# Directory where chat logs are saved
+# Logs are organized by username and timestamped
+# Default: ./chat_logs
+log_directory = ./chat_logs
