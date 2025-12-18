@@ -1260,11 +1260,6 @@ def long_polling():
             
             # Reset error counter on successful message retrieval
             consecutive_errors = 0
-            
-            # Process each group of messages (media groups or individual messages)
-            for message_group in grouped_messages:
-                # Use the first message as the primary message for extracting chat_id, text, etc.
-                latest_message = message_group[0]
 
         except requests.exceptions.Timeout as e:
             consecutive_errors += 1
@@ -1295,21 +1290,48 @@ def long_polling():
             time.sleep(backoff_time)
             continue
 
-        try:
+        # Process each group of messages (media groups or individual messages)
+        for message_group in grouped_messages:
+            # Use the first message as the primary message for extracting chat_id, text, etc.
+            latest_message = message_group[0]
+            
+            try:
 
-            # Check if we have a message or callback query
-            if 'message' in latest_message:
-                message_text = latest_message['message'].get('text', '')  # Use get() with a default value of ''
-                chat_id = latest_message['message']['chat']['id']
-            elif 'callback_query' in latest_message:
-                # Handle callback query from inline keyboard
-                callback_query = latest_message['callback_query']
-                chat_id = callback_query['message']['chat']['id']
-                selected_model = callback_query['data']
-                
-                # Block model changes in kiosk mode
-                if KIOSK_MODE:
-                    send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
+                # Check if we have a message or callback query
+                if 'message' in latest_message:
+                    message_text = latest_message['message'].get('text', '')  # Use get() with a default value of ''
+                    chat_id = latest_message['message']['chat']['id']
+                elif 'callback_query' in latest_message:
+                    # Handle callback query from inline keyboard
+                    callback_query = latest_message['callback_query']
+                    chat_id = callback_query['message']['chat']['id']
+                    selected_model = callback_query['data']
+                    
+                    # Block model changes in kiosk mode
+                    if KIOSK_MODE:
+                        send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
+                        try:
+                            requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
+                                "callback_query_id": callback_query['id']
+                            }, timeout=30)
+                        except NETWORK_EXCEPTIONS as e:
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error answering callback query: {e}")
+                        continue
+                    
+                    # Update the model version
+                    session_data[chat_id]["model_version"] = "openrouter:" + selected_model
+                    session_data[chat_id]["provider"] = "openrouter"
+                    
+                    # Send confirmation message with capabilities
+                    capability_msg = get_model_capability_message(selected_model)
+                    base_msg = f"Model has been changed to {selected_model}"
+                    if capability_msg:
+                        full_msg = f"{base_msg}\n{capability_msg}"
+                    else:
+                        full_msg = base_msg
+                    send_message(chat_id, full_msg)
+                    
+                    # Acknowledge the callback query
                     try:
                         requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
                             "callback_query_id": callback_query['id']
@@ -1317,351 +1339,329 @@ def long_polling():
                     except NETWORK_EXCEPTIONS as e:
                         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error answering callback query: {e}")
                     continue
-                
-                # Update the model version
-                session_data[chat_id]["model_version"] = "openrouter:" + selected_model
-                session_data[chat_id]["provider"] = "openrouter"
-                
-                # Send confirmation message with capabilities
-                capability_msg = get_model_capability_message(selected_model)
-                base_msg = f"Model has been changed to {selected_model}"
-                if capability_msg:
-                    full_msg = f"{base_msg}\n{capability_msg}"
                 else:
-                    full_msg = base_msg
-                send_message(chat_id, full_msg)
+                    continue
+
+                # if the message_text length is near the limit then maybe this is a truncated message
+                # so we need to get the rest of the message
+                if len(message_text) > 3000:
+                    # fast loop to look for any additional messages, down side of this is it adds at least one second
+                    while True:
+                        try:
+                            additional_response = requests.get(
+                                f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=1&offset={offset}",
+                                timeout=5  # Short timeout for additional message check
+                            )
+                            additional_response.raise_for_status()
+                            if not additional_response.json()['result']:
+                                break
+                            else:
+                                additional_latest_message = additional_response.json()['result'][-1]
+                                message_text += additional_latest_message['message']['text']
+                                offset = additional_latest_message['update_id'] + 1
+                                # after having got this additional text we loop because there might be more
+                        except NETWORK_EXCEPTIONS as e:
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting additional message text: {e}")
+                            break  # Stop trying to get additional messages on error
+
+
+                # check in the session data if there is a key with this chat_id, if not then initialize an empty one
+                if chat_id not in session_data:  # doing it now because we may have to accept setting model version
+                    initialize_session(chat_id)
                 
-                # Acknowledge the callback query
-                try:
-                    requests.post(f"https://api.telegram.org/bot{BOT_KEY}/answerCallbackQuery", json={
-                        "callback_query_id": callback_query['id']
-                    }, timeout=30)
-                except NETWORK_EXCEPTIONS as e:
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error answering callback query: {e}")
+                # Update activity timestamp and check for inactivity timeout (kiosk mode)
+                if check_inactivity_timeout(chat_id):
+                    send_message(chat_id, "⏰ Your session was cleared due to inactivity.")
+                    # Show logging notification after timeout clear
+                    notification = get_chat_log_notification()
+                    if notification:
+                        send_message(chat_id, notification)
+
+            except Exception as e:
+                print(f"Error reading last message on line {e.__traceback__.tb_lineno}: {e}")
                 continue
-            else:
-                continue
 
-            # if the message_text length is near the limit then maybe this is a truncated message
-            # so we need to get the rest of the message
-            if len(message_text) > 3000:
-                # fast loop to look for any additional messages, down side of this is it adds at least one second
-                while True:
-                    try:
-                        additional_response = requests.get(
-                            f"https://api.telegram.org/bot{BOT_KEY}/getUpdates?timeout=1&offset={offset}",
-                            timeout=5  # Short timeout for additional message check
-                        )
-                        additional_response.raise_for_status()
-                        if not additional_response.json()['result']:
-                            break
-                        else:
-                            additional_latest_message = additional_response.json()['result'][-1]
-                            message_text += additional_latest_message['message']['text']
-                            offset = additional_latest_message['update_id'] + 1
-                            # after having got this additional text we loop because there might be more
-                    except NETWORK_EXCEPTIONS as e:
-                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting additional message text: {e}")
-                        break  # Stop trying to get additional messages on error
-
-
-            # check in the session data if there is a key with this chat_id, if not then initialize an empty one
-            if chat_id not in session_data:  # doing it now because we may have to accept setting model version
-                initialize_session(chat_id)
-            
-            # Update activity timestamp and check for inactivity timeout (kiosk mode)
-            if check_inactivity_timeout(chat_id):
-                send_message(chat_id, "⏰ Your session was cleared due to inactivity.")
-                # Show logging notification after timeout clear
-                notification = get_chat_log_notification()
-                if notification:
-                    send_message(chat_id, notification)
-
-        except Exception as e:
-            print(f"Error reading last message on line {e.__traceback__.tb_lineno}: {e}")
-            continue
-
-        try:
+            try:
 
             # implement a /help command that outputs brief explanation of commands
-            if message_text.startswith('/help'):
-                if KIOSK_MODE:
-                    reply_text = "🔒 KIOSK MODE\n\n"
-                    reply_text += "This chatbot is running in kiosk mode with locked settings.\n\n"
-                    reply_text += "Available commands:\n"
-                    reply_text += "/help - this help message\n"
-                    reply_text += "/clear - clear the conversation context\n"
-                    reply_text += "/status - view current chatbot status\n\n"
-                    reply_text += "All other settings (model, prompt, etc.) are locked by the administrator.\n"
-                    reply_text += "Simply type your message or send an image to chat!"
-                else:
-                    reply_text = "Commands:\n"
-                    reply_text += "/help - this help message\n"
-                    reply_text += "/clear - clear the context\n"
-                    reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
-                    reply_text += "/gpt3 - set the model to gpt3\n"
-                    reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
-                    reply_text += "/gpt4o - set the model to gpt-4o\n"
-                    reply_text += "/gpt4omini - set the model to gpt-4o-mini\n"
-                    reply_text += "/claud3opus - set the model to Claud 3 Opus\n"
-                    reply_text += "/claud3haiku - set the model to Claud 3 Haiku\n"
-                    reply_text += "/llama38b - set the model to Llama 3 8B\n"
-                    reply_text += "/llama370b - set the model to Llama 3 70B\n"
-                    reply_text += "/listopenroutermodels - list all openrouter models with image capabilities\n"
-                    reply_text += "/openrouter <model id> - set the model to the model with the given id\n"
-                    reply_text += "/status - get the chatbot status, current model, current max rounds, current conversation length\n\n"
-                    reply_text += "📷 Image Features:\n"
-                    reply_text += "• Send images with text to vision-capable models for analysis\n"
-                    reply_text += "• Models with 📷 support image input (vision)\n"
-                    reply_text += "• Models with 🎨 support image output (generation)\n"
-                    reply_text += "• OpenRouter models automatically support images when capable"
-
-                send_message(chat_id, reply_text)
-                continue  # Skip the rest of the processing loop
-
-            if message_text.startswith('/status'):
-                current_model = session_data[chat_id]['model_version']
-                
-                # Show kiosk mode indicator at the top
-                if KIOSK_MODE:
-                    reply_text = "🔒 KIOSK MODE ACTIVE\n\n"
-                else:
-                    reply_text = ""
-                
-                reply_text += f"Model: {current_model}\n"
-                reply_text += f"Provider: {session_data[chat_id].get('provider', 'Not set')}\n"
-                
-                # Show image capabilities for OpenRouter models
-                if current_model.startswith("openrouter:"):
-                    model_id = current_model[11:]  # Remove "openrouter:" prefix
-                    capability_msg = get_model_capability_message(model_id)
-                    if capability_msg:
-                        reply_text += f"Image capabilities: {capability_msg.replace('🖼️ This model supports: ', '')}\n"
+                if message_text.startswith('/help'):
+                    if KIOSK_MODE:
+                        reply_text = "🔒 KIOSK MODE\n\n"
+                        reply_text += "This chatbot is running in kiosk mode with locked settings.\n\n"
+                        reply_text += "Available commands:\n"
+                        reply_text += "/help - this help message\n"
+                        reply_text += "/clear - clear the conversation context\n"
+                        reply_text += "/status - view current chatbot status\n\n"
+                        reply_text += "All other settings (model, prompt, etc.) are locked by the administrator.\n"
+                        reply_text += "Simply type your message or send an image to chat!"
+                    else:
+                        reply_text = "Commands:\n"
+                        reply_text += "/help - this help message\n"
+                        reply_text += "/clear - clear the context\n"
+                        reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
+                        reply_text += "/gpt3 - set the model to gpt3\n"
+                        reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
+                        reply_text += "/gpt4o - set the model to gpt-4o\n"
+                        reply_text += "/gpt4omini - set the model to gpt-4o-mini\n"
+                        reply_text += "/claud3opus - set the model to Claud 3 Opus\n"
+                        reply_text += "/claud3haiku - set the model to Claud 3 Haiku\n"
+                        reply_text += "/llama38b - set the model to Llama 3 8B\n"
+                        reply_text += "/llama370b - set the model to Llama 3 70B\n"
+                        reply_text += "/listopenroutermodels - list all openrouter models with image capabilities\n"
+                        reply_text += "/openrouter <model id> - set the model to the model with the given id\n"
+                        reply_text += "/status - get the chatbot status, current model, current max rounds, current conversation length\n\n"
+                        reply_text += "📷 Image Features:\n"
+                        reply_text += "• Send images with text to vision-capable models for analysis\n"
+                        reply_text += "• Models with 📷 support image input (vision)\n"
+                        reply_text += "• Models with 🎨 support image output (generation)\n"
+                        reply_text += "• OpenRouter models automatically support images when capable"
+    
+                    send_message(chat_id, reply_text)
+                    continue  # Skip the rest of the processing loop
+    
+                if message_text.startswith('/status'):
+                    current_model = session_data[chat_id]['model_version']
+                    
+                    # Show kiosk mode indicator at the top
+                    if KIOSK_MODE:
+                        reply_text = "🔒 KIOSK MODE ACTIVE\n\n"
+                    else:
+                        reply_text = ""
+                    
+                    reply_text += f"Model: {current_model}\n"
+                    reply_text += f"Provider: {session_data[chat_id].get('provider', 'Not set')}\n"
+                    
+                    # Show image capabilities for OpenRouter models
+                    if current_model.startswith("openrouter:"):
+                        model_id = current_model[11:]  # Remove "openrouter:" prefix
+                        capability_msg = get_model_capability_message(model_id)
+                        if capability_msg:
+                            reply_text += f"Image capabilities: {capability_msg.replace('🖼️ This model supports: ', '')}\n"
+                        else:
+                            reply_text += "Image capabilities: None\n"
+                    elif any(current_model.startswith(prefix) for prefix in ["gpt-4o", "gpt-4-turbo", "claude-3"]):
+                        reply_text += "Image capabilities: 📷 Image input (vision)\n"
                     else:
                         reply_text += "Image capabilities: None\n"
-                elif any(current_model.startswith(prefix) for prefix in ["gpt-4o", "gpt-4-turbo", "claude-3"]):
-                    reply_text += "Image capabilities: 📷 Image input (vision)\n"
-                else:
-                    reply_text += "Image capabilities: None\n"
-                
-                reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
-                reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
-                reply_text += f"Chatbot version: {version}\n"
-                
-                # Show kiosk-specific info
-                if KIOSK_MODE:
-                    reply_text += "\n🔒 Settings are locked by administrator"
-                    if KIOSK_INACTIVITY_TIMEOUT > 0:
-                        reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
-                
-                # Show chat logging status
-                if CHAT_LOG_LEVEL != 'off':
-                    reply_text += f"\n\n📝 Chat logging: {CHAT_LOG_LEVEL}"
-                
-                send_message(chat_id, reply_text)
-                
-                # Show logging notification if active
-                notification = get_chat_log_notification()
-                if notification:
-                    send_message(chat_id, notification)
-                continue
-
-            if message_text.startswith('/maxrounds'):
-                # Block maxrounds changes in kiosk mode (but allow viewing)
-                if len(message_text.split()) == 1:
-                    reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
+                    
+                    reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
+                    reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
+                    reply_text += f"Chatbot version: {version}\n"
+                    
+                    # Show kiosk-specific info
+                    if KIOSK_MODE:
+                        reply_text += "\n🔒 Settings are locked by administrator"
+                        if KIOSK_INACTIVITY_TIMEOUT > 0:
+                            reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
+                    
+                    # Show chat logging status
+                    if CHAT_LOG_LEVEL != 'off':
+                        reply_text += f"\n\n📝 Chat logging: {CHAT_LOG_LEVEL}"
+                    
+                    send_message(chat_id, reply_text)
+                    
+                    # Show logging notification if active
+                    notification = get_chat_log_notification()
+                    if notification:
+                        send_message(chat_id, notification)
+                    continue
+    
+                if message_text.startswith('/maxrounds'):
+                    # Block maxrounds changes in kiosk mode (but allow viewing)
+                    if len(message_text.split()) == 1:
+                        reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
+                        send_message(chat_id, reply_text)
+                        continue
+                    
+                    if KIOSK_MODE:
+                        send_message(chat_id, "🔒 Kiosk mode: Max rounds setting is locked.")
+                        continue
+    
+                    max_rounds = DEFAULT_MAX_ROUNDS
+                    try:
+                        if len(message_text.split()) > 1:
+                            max_rounds = int(message_text.split()[1])
+                    except ValueError:
+                        max_rounds = DEFAULT_MAX_ROUNDS
+                    
+                    if max_rounds < 1:
+                        max_rounds = DEFAULT_MAX_ROUNDS
+                    
+                    session_data[chat_id]['max_rounds'] = max_rounds
+                    reply_text = f"Max rounds set to {max_rounds}"
+                    send_message(chat_id, reply_text)
+                    continue  
+    
+                # Check for command to clear context
+                if message_text.startswith('/clear'):
+                    clear_context(chat_id)
+                    reply_text = f"Context cleared"
+                    send_message(chat_id, reply_text)
+                    # Show logging notification after clear
+                    notification = get_chat_log_notification()
+                    if notification:
+                        send_message(chat_id, notification)
+                    continue  # Skip the rest of the processing loop
+    
+                # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
+                if message_text.startswith('/listopenroutermodels'):
+                    if KIOSK_MODE:
+                        send_message(chat_id, "🔒 Kiosk mode: Model listing is not available.")
+                        continue
+                    reply_text = list_openrouter_models_as_message()
+                    send_message(chat_id, reply_text)
+                    continue  # Skip the rest of the processing loop
+                    
+                # Handle /openrouter command in long_polling
+                if message_text.startswith("/openrouter"):
+                    if KIOSK_MODE:
+                        send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
+                        continue
+                    if len(message_text.split()) == 1:
+                        send_message(chat_id, "Please specify a model name after the command")
+                        continue
+                    model_substring = message_text.split()[1]
+                    matching_models = get_matching_models(model_substring)
+                    if len(matching_models) == 0:
+                        send_message(chat_id, f"Model name {model_substring} not found in list of models")
+                        continue
+                    elif len(matching_models) == 1:
+                        model_id = matching_models[0]
+                        session_data[chat_id]["model_version"] = "openrouter:" + model_id
+                        session_data[chat_id]["provider"] = "openrouter"
+                        
+                        # Send confirmation message with capabilities
+                        capability_msg = get_model_capability_message(model_id)
+                        base_msg = f"Model has been changed to {session_data[chat_id]['model_version']}"
+                        if capability_msg:
+                            full_msg = f"{base_msg}\n{capability_msg}"
+                        else:
+                            full_msg = base_msg
+                        send_message(chat_id, full_msg)
+                        continue
+                    else:
+                        keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
+                        reply_markup = {'inline_keyboard': keyboard}
+                        # print(f'Keybord {keyboard}')
+                        send_message(chat_id, "Multiple models found, please select one:", reply_markup=reply_markup)
+                        continue
+    
+                # Check for other commands to switch models (excluding /openrouter here)
+                elif message_text.startswith("/gpt3") or message_text.startswith("/gpt4") or message_text.startswith("/claud3") or message_text.startswith("/llama3"):
+                    if KIOSK_MODE:
+                        send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
+                        continue
+                    update_model_version(chat_id, message_text)
+                    reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
                     send_message(chat_id, reply_text)
                     continue
-                
-                if KIOSK_MODE:
-                    send_message(chat_id, "🔒 Kiosk mode: Max rounds setting is locked.")
-                    continue
-
-                max_rounds = DEFAULT_MAX_ROUNDS
-                try:
-                    if len(message_text.split()) > 1:
-                        max_rounds = int(message_text.split()[1])
-                except ValueError:
-                    max_rounds = DEFAULT_MAX_ROUNDS
-                
-                if max_rounds < 1:
-                    max_rounds = DEFAULT_MAX_ROUNDS
-                
-                session_data[chat_id]['max_rounds'] = max_rounds
-                reply_text = f"Max rounds set to {max_rounds}"
-                send_message(chat_id, reply_text)
-                continue  
-
-            # Check for command to clear context
-            if message_text.startswith('/clear'):
-                clear_context(chat_id)
-                reply_text = f"Context cleared"
-                send_message(chat_id, reply_text)
-                # Show logging notification after clear
-                notification = get_chat_log_notification()
-                if notification:
-                    send_message(chat_id, notification)
-                continue  # Skip the rest of the processing loop
-
-            # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
-            if message_text.startswith('/listopenroutermodels'):
-                if KIOSK_MODE:
-                    send_message(chat_id, "🔒 Kiosk mode: Model listing is not available.")
-                    continue
-                reply_text = list_openrouter_models_as_message()
-                send_message(chat_id, reply_text)
-                continue  # Skip the rest of the processing loop
-                
-            # Handle /openrouter command in long_polling
-            if message_text.startswith("/openrouter"):
-                if KIOSK_MODE:
-                    send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
-                    continue
-                if len(message_text.split()) == 1:
-                    send_message(chat_id, "Please specify a model name after the command")
-                    continue
-                model_substring = message_text.split()[1]
-                matching_models = get_matching_models(model_substring)
-                if len(matching_models) == 0:
-                    send_message(chat_id, f"Model name {model_substring} not found in list of models")
-                    continue
-                elif len(matching_models) == 1:
-                    model_id = matching_models[0]
-                    session_data[chat_id]["model_version"] = "openrouter:" + model_id
-                    session_data[chat_id]["provider"] = "openrouter"
-                    
-                    # Send confirmation message with capabilities
-                    capability_msg = get_model_capability_message(model_id)
-                    base_msg = f"Model has been changed to {session_data[chat_id]['model_version']}"
-                    if capability_msg:
-                        full_msg = f"{base_msg}\n{capability_msg}"
-                    else:
-                        full_msg = base_msg
-                    send_message(chat_id, full_msg)
-                    continue
-                else:
-                    keyboard = [[{'text': model, 'callback_data': model}] for model in matching_models]
-                    reply_markup = {'inline_keyboard': keyboard}
-                    # print(f'Keybord {keyboard}')
-                    send_message(chat_id, "Multiple models found, please select one:", reply_markup=reply_markup)
-                    continue
-
-            # Check for other commands to switch models (excluding /openrouter here)
-            elif message_text.startswith("/gpt3") or message_text.startswith("/gpt4") or message_text.startswith("/claud3") or message_text.startswith("/llama3"):
-                if KIOSK_MODE:
-                    send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
-                    continue
-                update_model_version(chat_id, message_text)
-                reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
-                send_message(chat_id, reply_text)
+    
+    
+    
+            except Exception as e:
+                print(f"Error handling commands on line {e.__traceback__.tb_lineno}: {e}")
                 continue
 
-
-
-        except Exception as e:
-            print(f"Error handling commands on line {e.__traceback__.tb_lineno}: {e}")
-            continue
-
-        try:            
-            # Collect images and captions from all messages in the group (handles media groups)
-            image_data_base64_list = []
-            all_captions = []
-            max_allowed_size = 2048
-            
-            # Check if this is a media group (multiple messages)
-            is_media_group = len(message_group) > 1
-            if is_media_group:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processing media group with {len(message_group)} images")
-            
-            # Process each message in the group to collect all images
-            for msg_update in message_group:
-                if 'message' not in msg_update:
-                    continue
-                    
-                msg = msg_update['message']
+            try:            
+                # Collect images and captions from all messages in the group (handles media groups)
+                image_data_base64_list = []
+                all_captions = []
+                max_allowed_size = 2048
                 
-                # Collect image from this message if present
-                if 'photo' in msg:
-                    photos = msg['photo']
-                    message_photo = None
-                    
-                    # Find the largest photo that meets the size criteria
-                    for photo in reversed(photos):
-                        if all(dimension <= max_allowed_size for dimension in (photo['width'], photo['height'])):
-                            message_photo = photo['file_id']
-                            break
-                    
-                    if message_photo:
-                        # Retrieve the file path of the image with retry logic
-                        max_retries = 3
-                        file_path = None
-                        for attempt in range(max_retries):
-                            try:
-                                file_info_response = requests.get(
-                                    f"https://api.telegram.org/bot{BOT_KEY}/getFile?file_id={message_photo}",
-                                    timeout=30
-                                )
-                                file_info_response.raise_for_status()
-                                file_info = file_info_response.json()
-                                file_path = file_info['result']['file_path']
-                                break
-                            except NETWORK_EXCEPTIONS as e:
-                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting file info (attempt {attempt + 1}/{max_retries}): {e}")
-                                if attempt < max_retries - 1:
-                                    time.sleep(2 ** attempt)
-                                    continue
-                                else:
-                                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to get file info after {max_retries} attempts")
+                # Check if this is a media group (multiple messages)
+                is_media_group = len(message_group) > 1
+                if is_media_group:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processing media group with {len(message_group)} images")
+                
+                # Process each message in the group to collect all images
+                for msg_update in message_group:
+                    if 'message' not in msg_update:
+                        continue
                         
-                        # Download the image if we got the file path
-                        if file_path:
-                            image_data = download_image(file_path)
-                            if image_data is not None:
-                                image_data_base64 = base64.b64encode(image_data).decode('utf-8')
-                                image_data_base64_list.append(image_data_base64)
-                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Successfully downloaded image {len(image_data_base64_list)} from media group")
+                    msg = msg_update['message']
+                    
+                    # Collect image from this message if present
+                    if 'photo' in msg:
+                        photos = msg['photo']
+                        message_photo = None
+                        
+                        # Find the largest photo that meets the size criteria
+                        for photo in reversed(photos):
+                            if all(dimension <= max_allowed_size for dimension in (photo['width'], photo['height'])):
+                                message_photo = photo['file_id']
+                                break
+                        
+                        if message_photo:
+                            # Retrieve the file path of the image with retry logic
+                            max_retries = 3
+                            file_path = None
+                            for attempt in range(max_retries):
+                                try:
+                                    file_info_response = requests.get(
+                                        f"https://api.telegram.org/bot{BOT_KEY}/getFile?file_id={message_photo}",
+                                        timeout=30
+                                    )
+                                    file_info_response.raise_for_status()
+                                    file_info = file_info_response.json()
+                                    file_path = file_info['result']['file_path']
+                                    break
+                                except NETWORK_EXCEPTIONS as e:
+                                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting file info (attempt {attempt + 1}/{max_retries}): {e}")
+                                    if attempt < max_retries - 1:
+                                        time.sleep(2 ** attempt)
+                                        continue
+                                    else:
+                                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to get file info after {max_retries} attempts")
+                            
+                            # Download the image if we got the file path
+                            if file_path:
+                                image_data = download_image(file_path)
+                                if image_data is not None:
+                                    image_data_base64 = base64.b64encode(image_data).decode('utf-8')
+                                    image_data_base64_list.append(image_data_base64)
+                                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Successfully downloaded image {len(image_data_base64_list)} from media group")
+                                else:
+                                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download image from media group")
                             else:
-                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download image from media group")
-                        else:
-                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to retrieve file path for image in media group")
+                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to retrieve file path for image in media group")
+                    
+                    # Collect caption if present
+                    if 'caption' in msg:
+                        all_captions.append(msg['caption'])
                 
-                # Collect caption if present
-                if 'caption' in msg:
-                    all_captions.append(msg['caption'])
-            
-            # Combine all captions with the message text
-            if all_captions:
-                message_text = message_text + " \n\n " + " \n\n ".join(all_captions)
-            
-            # Show warning only if we failed to get ANY images when photos were present
-            if is_media_group and not image_data_base64_list:
-                send_message(chat_id, "⚠️ Failed to download images from media group due to network issues. Please try again.")
-
-        except Exception as e:
-            print(
-                f"Error dealing with photo or caption on line {e.__traceback__.tb_lineno}: {e}")
-            continue
-
-
-        try:
-            # Show logging notification if needed (first interaction or after context clear)
-            if session_data[chat_id].get('notification_needed', False):
-                notification = get_chat_log_notification()
-                if notification:
-                    send_message(chat_id, notification)
-                session_data[chat_id]['notification_needed'] = False
-            
-            # Get reply from OpenAI and send it back to the user
-            reply_text, tokens_used = get_reply(message_text, image_data_base64_list, chat_id)
-            # Update activity timestamp after successful interaction
-            update_activity(chat_id)
-            # Only send text message if there's actual content to send
-            if reply_text and reply_text.strip():
-                send_message(chat_id, reply_text)
-
-        except Exception as e:
-            print(f"Error getting reply  on line {e.__traceback__.tb_lineno}: {e}")
-            continue
+                # Combine all captions with the message text
+                if all_captions:
+                    message_text = message_text + " \n\n " + " \n\n ".join(all_captions)
+                
+                # Show warning only if we failed to get ANY images when photos were present
+                if is_media_group and not image_data_base64_list:
+                    send_message(chat_id, "⚠️ Failed to download images from media group due to network issues. Please try again.")
+    
+            except Exception as e:
+                print(
+                    f"Error dealing with photo or caption on line {e.__traceback__.tb_lineno}: {e}")
+                continue
+    
+    
+            try:
+                # Show logging notification if needed (first interaction or after context clear)
+                if session_data[chat_id].get('notification_needed', False):
+                    notification = get_chat_log_notification()
+                    if notification:
+                        send_message(chat_id, notification)
+                    session_data[chat_id]['notification_needed'] = False
+                
+                # Get reply from OpenAI and send it back to the user
+                reply_text, tokens_used = get_reply(message_text, image_data_base64_list, chat_id)
+                # Update activity timestamp after successful interaction
+                update_activity(chat_id)
+                # Only send text message if there's actual content to send
+                if reply_text and reply_text.strip():
+                    send_message(chat_id, reply_text)
+    
+            except Exception as e:
+                print(f"Error getting reply  on line {e.__traceback__.tb_lineno}: {e}")
+                continue
 
 # Send a message to user
 def send_message(chat_id, text, reply_markup=None):
