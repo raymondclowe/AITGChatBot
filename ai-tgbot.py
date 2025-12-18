@@ -363,8 +363,9 @@ def initialize_session(chat_id):
             }
         ]
     
+    # Set flag to show logging notification on first interaction
+    session['notification_needed'] = True
     session_data[chat_id] = session
-    session['notification_needed'] = True  # Flag to show logging notification on first interaction
     return session
 
 
@@ -1464,8 +1465,8 @@ def long_polling():
             continue
 
 
-        try:            
-           # Show logging notification if needed (first interaction or after context clear)
+        try:
+            # Show logging notification if needed (first interaction or after context clear)
             if session_data[chat_id].get('notification_needed', False):
                 notification = get_chat_log_notification()
                 if notification:
