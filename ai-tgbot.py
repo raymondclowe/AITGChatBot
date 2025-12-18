@@ -240,7 +240,8 @@ def should_show_notification(chat_id):
         return False
     
     if chat_id not in session_data:
-        return True
+        # Session should exist at this point, but be defensive
+        initialize_session(chat_id)
     
     # Get today's date
     today = datetime.now().strftime('%Y-%m-%d')
@@ -254,9 +255,11 @@ def should_show_notification(chat_id):
 
 def mark_notification_shown(chat_id):
     """Mark that the notification has been shown today"""
-    if chat_id in session_data:
-        today = datetime.now().strftime('%Y-%m-%d')
-        session_data[chat_id]['notification_shown_date'] = today
+    if chat_id not in session_data:
+        # Initialize session if it doesn't exist (defensive programming)
+        initialize_session(chat_id)
+    today = datetime.now().strftime('%Y-%m-%d')
+    session_data[chat_id]['notification_shown_date'] = today
 
 def get_username_for_logging(chat_id):
     """
@@ -1494,7 +1497,7 @@ def long_polling():
                 if message_text.startswith('/maxrounds'):
                     # Block maxrounds changes in kiosk mode (but allow viewing)
                     if len(message_text.split()) == 1:
-                        reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
+                        reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}"
                         send_message(chat_id, reply_text)
                         continue
                     
