@@ -1422,8 +1422,7 @@ def long_polling():
                 continue
 
             try:
-
-            # implement a /start command (people expect it)
+                # implement a /start command (people expect it)
                 if message_text.startswith('/start'):
                     if KIOSK_MODE:
                         reply_text = "🔒 Welcome to KIOSK MODE\n\n"
@@ -1444,12 +1443,11 @@ def long_polling():
                         reply_text += "/clear - clear conversation context\n\n"
                         reply_text += "Type /help for a full list of commands and features.\n"
                         reply_text += "Simply type your message or send an image to start chatting!"
-    
                     send_message(chat_id, reply_text)
                     continue  # Skip the rest of the processing loop
 
-            # implement a /help command that outputs brief explanation of commands
-                if message_text.startswith('/help'):
+                # implement a /help command that outputs brief explanation of commands
+                elif message_text.startswith('/help'):
                     if KIOSK_MODE:
                         reply_text = "🔒 KIOSK MODE HELP\n\n"
                         reply_text += "This chatbot is running in kiosk mode with locked settings.\n\n"
@@ -1486,7 +1484,7 @@ def long_polling():
                     send_message(chat_id, reply_text)
                     continue  # Skip the rest of the processing loop
     
-                if message_text.startswith('/status'):
+                elif message_text.startswith('/status'):
                     current_model = session_data[chat_id]['model_version']
                     
                     # Show kiosk mode indicator at the top
@@ -1535,7 +1533,7 @@ def long_polling():
                         send_message(chat_id, notification)
                     continue
 
-                if message_text.startswith('/maxrounds'):
+                elif message_text.startswith('/maxrounds'):
                     # Block maxrounds changes in kiosk mode (but allow viewing)
                     if len(message_text.split()) == 1:
                         reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}"
@@ -1562,7 +1560,7 @@ def long_polling():
                     continue  
     
                 # Check for command to clear context
-                if message_text.startswith('/clear'):
+                elif message_text.startswith('/clear'):
                     clear_context(chat_id)
                     reply_text = f"Context cleared"
                     send_message(chat_id, reply_text)
@@ -1573,7 +1571,7 @@ def long_polling():
                     continue  # Skip the rest of the processing loop
     
                 # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
-                if message_text.startswith('/listopenroutermodels'):
+                elif message_text.startswith('/listopenroutermodels'):
                     if KIOSK_MODE:
                         send_message(chat_id, "🔒 Kiosk mode: Model listing is not available.")
                         continue
@@ -1582,7 +1580,7 @@ def long_polling():
                     continue  # Skip the rest of the processing loop
                     
                 # Handle /openrouter command in long_polling
-                if message_text.startswith("/openrouter"):
+                elif message_text.startswith("/openrouter"):
                     if KIOSK_MODE:
                         send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
                         continue
