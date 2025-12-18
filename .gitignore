@@ -168,3 +168,6 @@ llm_debug.log
 
 # Chat logs directory
 chat_logs/
+
+# Local kiosk configuration (use kiosk.conf.example as template)
+kiosk.conf
