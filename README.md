@@ -73,6 +73,60 @@ inactivity_timeout = 3600
 python ai-tgbot.py
 ```
 
+## Chat Logging
+
+The bot supports chat logging with separate log levels for user and assistant messages. This provides fine-grained control over what gets logged, which is useful for privacy, auditing, and debugging purposes.
+
+### Configuration
+
+Add a `[logging]` section to your `kiosk.conf` file:
+
+```ini
+[logging]
+# Separate log levels for user and assistant messages
+# Values: off, minimum (text only), extended (text + attachments)
+log_user_messages = minimum
+log_assistant_messages = extended
+
+# Directory where chat logs are saved
+log_directory = ./chat_logs
+```
+
+### Log Levels
+
+- `off` - No logging for this role
+- `minimum` - Log text messages only
+- `extended` - Log text messages and images/attachments
+
+### Use Cases
+
+**Privacy/Auditing**: Log only user messages for audit trails:
+```ini
+log_user_messages = minimum
+log_assistant_messages = off
+```
+
+**Debugging**: Log only assistant responses to troubleshoot model behavior:
+```ini
+log_user_messages = off
+log_assistant_messages = extended
+```
+
+**Full Logging**: Log everything for comprehensive records:
+```ini
+log_user_messages = extended
+log_assistant_messages = extended
+```
+
+### Backward Compatibility
+
+For backward compatibility, you can still use the legacy `log_chats` setting, which applies the same level to both user and assistant messages:
+
+```ini
+[logging]
+log_chats = minimum
+```
+
 ## Commands
 
 ### Standard Mode

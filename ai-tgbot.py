@@ -143,13 +143,15 @@ KIOSK_SYSTEM_PROMPT = ""
 
 # Chat logging configuration
 # Settings loaded from kiosk.conf file and command line
-CHAT_LOG_LEVEL = 'off'  # off, minimum, extended
+CHAT_LOG_LEVEL = 'off'  # off, minimum, extended (deprecated - use separate levels)
+CHAT_LOG_LEVEL_USER = 'off'  # off, minimum, extended
+CHAT_LOG_LEVEL_ASSISTANT = 'off'  # off, minimum, extended
 CHAT_LOG_DIRECTORY = './chat_logs'
 
 def load_kiosk_config():
     """Load kiosk mode configuration from kiosk.conf file"""
     global KIOSK_MODE, KIOSK_MODEL, KIOSK_PROMPT_FILE, KIOSK_INACTIVITY_TIMEOUT, KIOSK_SYSTEM_PROMPT
-    global CHAT_LOG_LEVEL, CHAT_LOG_DIRECTORY
+    global CHAT_LOG_LEVEL, CHAT_LOG_LEVEL_USER, CHAT_LOG_LEVEL_ASSISTANT, CHAT_LOG_DIRECTORY
     
     config_file = 'kiosk.conf'
     if not os.path.exists(config_file):
@@ -167,7 +169,21 @@ def load_kiosk_config():
         
         # Parse chat logging settings from [logging] section if present
         if config.has_section('logging'):
-            CHAT_LOG_LEVEL = config.get('logging', 'log_chats', fallback='off').lower()
+            # Check for new separate log levels first
+            log_user = config.get('logging', 'log_user_messages', fallback=None)
+            log_assistant = config.get('logging', 'log_assistant_messages', fallback=None)
+            
+            if log_user is not None or log_assistant is not None:
+                # Use separate log levels if specified
+                CHAT_LOG_LEVEL_USER = log_user.lower() if log_user else 'off'
+                CHAT_LOG_LEVEL_ASSISTANT = log_assistant.lower() if log_assistant else 'off'
+            else:
+                # Fallback to legacy single log_chats setting for backward compatibility
+                legacy_level = config.get('logging', 'log_chats', fallback='off').lower()
+                CHAT_LOG_LEVEL = legacy_level
+                CHAT_LOG_LEVEL_USER = legacy_level
+                CHAT_LOG_LEVEL_ASSISTANT = legacy_level
+            
             CHAT_LOG_DIRECTORY = config.get('logging', 'log_directory', fallback='./chat_logs')
         
         print(f"Kiosk config: Loaded settings from {config_file}")
@@ -187,11 +203,19 @@ load_kiosk_config()
 # Apply command-line override for chat logging if provided
 if args.log_chats is not None:
     CHAT_LOG_LEVEL = args.log_chats
+    CHAT_LOG_LEVEL_USER = args.log_chats
+    CHAT_LOG_LEVEL_ASSISTANT = args.log_chats
 
-# Validate and normalize chat log level
-if CHAT_LOG_LEVEL not in ['off', 'minimum', 'extended']:
-    print(f"WARNING: Invalid chat log level '{CHAT_LOG_LEVEL}', defaulting to 'off'")
-    CHAT_LOG_LEVEL = 'off'
+# Validate and normalize chat log levels
+def validate_log_level(level, level_name):
+    if level not in ['off', 'minimum', 'extended']:
+        print(f"WARNING: Invalid chat log level for {level_name} '{level}', defaulting to 'off'")
+        return 'off'
+    return level
+
+CHAT_LOG_LEVEL = validate_log_level(CHAT_LOG_LEVEL, 'legacy log_chats')
+CHAT_LOG_LEVEL_USER = validate_log_level(CHAT_LOG_LEVEL_USER, 'user messages')
+CHAT_LOG_LEVEL_ASSISTANT = validate_log_level(CHAT_LOG_LEVEL_ASSISTANT, 'assistant messages')
 
 # Load system prompt from file if kiosk mode is enabled
 if KIOSK_MODE and KIOSK_PROMPT_FILE:
@@ -218,16 +242,17 @@ if KIOSK_MODE:
     print(f"   Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s" if KIOSK_INACTIVITY_TIMEOUT > 0 else "   Inactivity timeout: Disabled")
 
 # Display chat logging status
-if CHAT_LOG_LEVEL != 'off':
+if CHAT_LOG_LEVEL_USER != 'off' or CHAT_LOG_LEVEL_ASSISTANT != 'off':
     print(f"📝 CHAT LOGGING ENABLED")
-    print(f"   Level: {CHAT_LOG_LEVEL}")
+    print(f"   User messages: {CHAT_LOG_LEVEL_USER}")
+    print(f"   Assistant messages: {CHAT_LOG_LEVEL_ASSISTANT}")
     print(f"   Directory: {CHAT_LOG_DIRECTORY}")
     print(f"   ⚠️  Users will be notified that chats are being recorded")
 
 # Chat logging helper functions
 def get_chat_log_notification():
     """Get the notification message shown to users when logging is active"""
-    if CHAT_LOG_LEVEL == 'off':
+    if CHAT_LOG_LEVEL_USER == 'off' and CHAT_LOG_LEVEL_ASSISTANT == 'off':
         return None
     return "⚠️ This chat is being recorded for training and service improvement purposes."
 
@@ -251,7 +276,7 @@ def ensure_log_directory(chat_id):
     Ensure the log directory for a chat exists and return the path.
     Returns None if logging is disabled or directory creation fails.
     """
-    if CHAT_LOG_LEVEL == 'off':
+    if CHAT_LOG_LEVEL_USER == 'off' and CHAT_LOG_LEVEL_ASSISTANT == 'off':
         return None
     
     username = get_username_for_logging(chat_id)
@@ -346,7 +371,15 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         text_content: The text content of the message
         image_data: Optional image data (bytes) for extended logging
     """
-    if CHAT_LOG_LEVEL == 'off':
+    # Determine which log level to use based on role
+    if role == 'user':
+        current_log_level = CHAT_LOG_LEVEL_USER
+    elif role == 'assistant':
+        current_log_level = CHAT_LOG_LEVEL_ASSISTANT
+    else:
+        current_log_level = 'off'
+    
+    if current_log_level == 'off':
         return
     
     try:
@@ -379,7 +412,7 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
             f.write(log_entry)
         
         # Handle image logging in extended mode
-        if CHAT_LOG_LEVEL == 'extended' and image_data is not None:
+        if current_log_level == 'extended' and image_data is not None:
             # Save image in its native format (JPEG, PNG, etc.) with appropriate quality
             saved_filename, success = save_image_with_format(image_data, user_dir, timestamp_safe, role)
             
@@ -941,7 +974,7 @@ def get_reply(message, image_data_64, session_id):
     log_chat_message(session_id, 'assistant', response_text, None)
     
     # Log all images separately if in extended mode
-    if images_received and CHAT_LOG_LEVEL == 'extended':
+    if images_received and CHAT_LOG_LEVEL_ASSISTANT == 'extended':
         for idx, (image_data, mime_type) in enumerate(images_received):
             # Log each image separately with index if multiple
             image_note = f"[Image {idx+1} of {len(images_received)}]" if len(images_received) > 1 else "[Image]"
@@ -1380,8 +1413,10 @@ def long_polling():
                         reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
                 
                 # Show chat logging status
-                if CHAT_LOG_LEVEL != 'off':
-                    reply_text += f"\n\n📝 Chat logging: {CHAT_LOG_LEVEL}"
+                if CHAT_LOG_LEVEL_USER != 'off' or CHAT_LOG_LEVEL_ASSISTANT != 'off':
+                    reply_text += f"\n\n📝 Chat logging:"
+                    reply_text += f"\n   User: {CHAT_LOG_LEVEL_USER}"
+                    reply_text += f"\n   Assistant: {CHAT_LOG_LEVEL_ASSISTANT}"
                 
                 send_message(chat_id, reply_text)
                 
