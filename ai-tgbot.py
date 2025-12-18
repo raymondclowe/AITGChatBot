@@ -519,7 +519,18 @@ def clear_context(chat_id):
     session_data[chat_id]['notification_needed'] = True
 
 
-def get_reply(message, image_data_64, session_id):
+def get_reply(message, image_data_64_list, session_id):
+    """
+    Get reply from AI backend.
+    
+    Args:
+        message: Text message from user
+        image_data_64_list: List of base64-encoded image data strings (can be empty, single, or multiple images)
+        session_id: Chat session ID
+    
+    Returns:
+        Tuple of (response_text, tokens_used)
+    """
     note = ""
     response_text = ""
     if not session_data[session_id]:
@@ -546,19 +557,35 @@ def get_reply(message, image_data_64, session_id):
             # "datetime": datetime.now(),
         }
     ]
-    user_image_data = None
-    if image_data_64:  # If there's a new image, include it in the user's message
-        has_image = True
-        image_content_item = {
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{image_data_64}"},
-        }
-        new_user_message[0]["content"].append(image_content_item)
-        # Store image data for logging
-        user_image_data = base64.b64decode(image_data_64)
     
-    # Log the user message
-    log_chat_message(session_id, 'user', message, user_image_data)
+    # Handle multiple images - normalize input to list
+    if image_data_64_list is None:
+        image_data_64_list = []
+    elif isinstance(image_data_64_list, str):
+        # Legacy support: convert single string to list
+        image_data_64_list = [image_data_64_list]
+    
+    # Add all images to the user message
+    user_image_data_list = []
+    if image_data_64_list:
+        has_image = True
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Adding {len(image_data_64_list)} image(s) to user message for session {session_id}")
+        for idx, image_data_64 in enumerate(image_data_64_list):
+            image_content_item = {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image_data_64}"},
+            }
+            new_user_message[0]["content"].append(image_content_item)
+            # Store image data for logging
+            user_image_data_list.append(base64.b64decode(image_data_64))
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]   Image {idx+1}: {len(image_data_64)} chars base64 ({len(user_image_data_list[idx])} bytes)")
+    
+    # Log the user message (text first, then images separately in extended mode)
+    log_chat_message(session_id, 'user', message, None)
+    if user_image_data_list and CHAT_LOG_LEVEL == 'extended':
+        for idx, image_data in enumerate(user_image_data_list):
+            image_note = f"[User Image {idx+1} of {len(user_image_data_list)}]" if len(user_image_data_list) > 1 else "[User Image]"
+            log_chat_message(session_id, 'user', image_note, image_data)
     
     # Update the conversation with the new user message
     session_data[session_id]["CONVERSATION"].extend(new_user_message)
@@ -1156,6 +1183,47 @@ def get_matching_models(substring):
     return matching_models
 
 
+def group_media_messages(result_list):
+    """
+    Group messages by media_group_id and organize for processing.
+    
+    Returns a list of tuples: (messages_to_process, new_offset)
+    where messages_to_process is a list of messages that should be handled together
+    """
+    if not result_list:
+        return []
+    
+    # Track messages by media_group_id
+    media_groups = {}
+    regular_messages = []
+    
+    for update in result_list:
+        if 'message' not in update:
+            # Not a regular message (might be callback, etc.) - treat as regular
+            regular_messages.append([update])
+            continue
+            
+        message = update['message']
+        media_group_id = message.get('media_group_id')
+        
+        if media_group_id:
+            # Part of a media group - collect with others
+            if media_group_id not in media_groups:
+                media_groups[media_group_id] = []
+            media_groups[media_group_id].append(update)
+        else:
+            # Regular message without media group
+            regular_messages.append([update])
+    
+    # Combine all messages - media groups first, then regular messages
+    all_grouped = []
+    for group_messages in media_groups.values():
+        all_grouped.append(group_messages)
+    all_grouped.extend(regular_messages)
+    
+    return all_grouped
+
+
 # Long polling loop
 def long_polling():
     offset = 0
@@ -1184,12 +1252,19 @@ def long_polling():
                 consecutive_errors = 0
                 continue
 
-            # Get the latest message and update the offset
-            latest_message = result_list[-1]
-            offset = latest_message['update_id'] + 1
+            # Group messages by media_group_id to handle multiple images together
+            grouped_messages = group_media_messages(result_list)
+            
+            # Update offset to skip all processed messages
+            offset = result_list[-1]['update_id'] + 1
             
             # Reset error counter on successful message retrieval
             consecutive_errors = 0
+            
+            # Process each group of messages (media groups or individual messages)
+            for message_group in grouped_messages:
+                # Use the first message as the primary message for extracting chat_id, text, etc.
+                latest_message = message_group[0]
 
         except requests.exceptions.Timeout as e:
             consecutive_errors += 1
@@ -1488,62 +1563,79 @@ def long_polling():
             continue
 
         try:            
-            # Get the image and caption if they exist
-            message_photo = None
-            message_caption = None
-            image_data = None
-            image_data_base64 = None
-
-            if 'photo' in latest_message['message']:
-                # If the message has a photo, find the largest photo that meets the size criteria
-                photos = latest_message['message']['photo']
-                max_allowed_size = 2048
-
-                for photo in reversed(photos):
-                    if all(dimension <= max_allowed_size for dimension in (photo['width'], photo['height'])):
-                        message_photo = photo['file_id']
-                        break
+            # Collect images and captions from all messages in the group (handles media groups)
+            image_data_base64_list = []
+            all_captions = []
+            max_allowed_size = 2048
+            
+            # Check if this is a media group (multiple messages)
+            is_media_group = len(message_group) > 1
+            if is_media_group:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processing media group with {len(message_group)} images")
+            
+            # Process each message in the group to collect all images
+            for msg_update in message_group:
+                if 'message' not in msg_update:
+                    continue
                     
-            if message_photo:
-                # Retrieve the file path of the image with retry logic
-                max_retries = 3
-                file_path = None
-                for attempt in range(max_retries):
-                    try:
-                        file_info_response = requests.get(
-                            f"https://api.telegram.org/bot{BOT_KEY}/getFile?file_id={message_photo}",
-                            timeout=30  # Timeout for file info request
-                        )
-                        file_info_response.raise_for_status()
-                        file_info = file_info_response.json()
-                        file_path = file_info['result']['file_path']
-                        break  # Success
-                    except NETWORK_EXCEPTIONS as e:
-                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting file info (attempt {attempt + 1}/{max_retries}): {e}")
-                        if attempt < max_retries - 1:
-                            time.sleep(2 ** attempt)
-                            continue
+                msg = msg_update['message']
+                
+                # Collect image from this message if present
+                if 'photo' in msg:
+                    photos = msg['photo']
+                    message_photo = None
+                    
+                    # Find the largest photo that meets the size criteria
+                    for photo in reversed(photos):
+                        if all(dimension <= max_allowed_size for dimension in (photo['width'], photo['height'])):
+                            message_photo = photo['file_id']
+                            break
+                    
+                    if message_photo:
+                        # Retrieve the file path of the image with retry logic
+                        max_retries = 3
+                        file_path = None
+                        for attempt in range(max_retries):
+                            try:
+                                file_info_response = requests.get(
+                                    f"https://api.telegram.org/bot{BOT_KEY}/getFile?file_id={message_photo}",
+                                    timeout=30
+                                )
+                                file_info_response.raise_for_status()
+                                file_info = file_info_response.json()
+                                file_path = file_info['result']['file_path']
+                                break
+                            except NETWORK_EXCEPTIONS as e:
+                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error getting file info (attempt {attempt + 1}/{max_retries}): {e}")
+                                if attempt < max_retries - 1:
+                                    time.sleep(2 ** attempt)
+                                    continue
+                                else:
+                                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to get file info after {max_retries} attempts")
+                        
+                        # Download the image if we got the file path
+                        if file_path:
+                            image_data = download_image(file_path)
+                            if image_data is not None:
+                                image_data_base64 = base64.b64encode(image_data).decode('utf-8')
+                                image_data_base64_list.append(image_data_base64)
+                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Successfully downloaded image {len(image_data_base64_list)} from media group")
+                            else:
+                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download image from media group")
                         else:
-                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to get file info after {max_retries} attempts")
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to retrieve file path for image in media group")
                 
-                # Download the image only if we got the file path
-                if file_path:
-                    image_data = download_image(file_path)
-                    
-                    # Base64 encode the image data
-                    if image_data is not None:
-                        image_data_base64 = base64.b64encode(image_data).decode('utf-8')
-                    else:
-                        image_data_base64 = None
-                        send_message(chat_id, "⚠️ Failed to download the image due to network issues. Please try again.")
-                else:
-                    send_message(chat_id, "⚠️ Failed to retrieve image information due to network issues. Please try again.")
-
-            if 'caption' in latest_message['message']:
-                # If the message has a caption, get the caption text
-                message_caption = latest_message['message']['caption']
-                
-                message_text = message_text + " \n\n " + message_caption
+                # Collect caption if present
+                if 'caption' in msg:
+                    all_captions.append(msg['caption'])
+            
+            # Combine all captions with the message text
+            if all_captions:
+                message_text = message_text + " \n\n " + " \n\n ".join(all_captions)
+            
+            # Show warning only if we failed to get ANY images when photos were present
+            if is_media_group and not image_data_base64_list:
+                send_message(chat_id, "⚠️ Failed to download images from media group due to network issues. Please try again.")
 
         except Exception as e:
             print(
@@ -1560,7 +1652,7 @@ def long_polling():
                 session_data[chat_id]['notification_needed'] = False
             
             # Get reply from OpenAI and send it back to the user
-            reply_text, tokens_used = get_reply(message_text, image_data_base64, chat_id)
+            reply_text, tokens_used = get_reply(message_text, image_data_base64_list, chat_id)
             # Update activity timestamp after successful interaction
             update_activity(chat_id)
             # Only send text message if there's actual content to send
