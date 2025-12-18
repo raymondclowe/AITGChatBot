@@ -273,12 +273,16 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         os.makedirs(user_dir, exist_ok=True)
         
         # Create a session-based log file (reuse same file for conversation)
-        # Store the current log file in session data
+        # Store the current log file in session data if session exists
+        log_file = None
         if chat_id in session_data and 'log_file' in session_data[chat_id]:
             log_file = session_data[chat_id]['log_file']
-        else:
+        
+        # If no log file yet, create a new one
+        if not log_file:
             timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
             log_file = os.path.join(user_dir, f'chat_{timestamp}.txt')
+            # Store in session data if session exists
             if chat_id in session_data:
                 session_data[chat_id]['log_file'] = log_file
         
@@ -292,8 +296,8 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         
         # Handle image logging in extended mode
         if CHAT_LOG_LEVEL == 'extended' and image_data is not None:
-            # Save image with same timestamp
-            image_filename = os.path.join(user_dir, f'image_{datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}_{role}.jpg')
+            # Save image with same timestamp, use generic extension to preserve data
+            image_filename = os.path.join(user_dir, f'image_{datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}_{role}.bin')
             with open(image_filename, 'wb') as img_file:
                 img_file.write(image_data)
             
@@ -853,7 +857,7 @@ def get_reply(message, image_data_64, session_id):
     assistant_image_data = None
     if images_received and CHAT_LOG_LEVEL == 'extended':
         # Log first image if present (for simplicity)
-        assistant_image_data = images_received[0][0] if images_received else None
+        assistant_image_data = images_received[0][0]
     log_chat_message(session_id, 'assistant', response_text, assistant_image_data)
 
     # Optional: print the session_data for debugging
