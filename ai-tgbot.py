@@ -1423,20 +1423,47 @@ def long_polling():
 
             try:
 
+            # implement a /start command (people expect it)
+                if message_text.startswith('/start'):
+                    if KIOSK_MODE:
+                        reply_text = "🔒 Welcome to KIOSK MODE\n\n"
+                        reply_text += "This chatbot is running in kiosk mode with locked settings.\n\n"
+                        reply_text += "Available commands:\n"
+                        reply_text += "/start - show this welcome message\n"
+                        reply_text += "/help - show help information\n"
+                        reply_text += "/clear - clear the conversation context\n"
+                        reply_text += "/status - view current chatbot status\n\n"
+                        reply_text += "Simply type your message or send an image to start chatting!"
+                    else:
+                        reply_text = "👋 Welcome to AI Telegram ChatBot!\n\n"
+                        reply_text += "This bot connects to multiple AI backends including OpenAI, Anthropic, OpenRouter, and Groq.\n\n"
+                        reply_text += "Available commands:\n"
+                        reply_text += "/start - show this welcome message\n"
+                        reply_text += "/help - show detailed help\n"
+                        reply_text += "/status - view current status\n"
+                        reply_text += "/clear - clear conversation context\n\n"
+                        reply_text += "Type /help for a full list of commands and features.\n"
+                        reply_text += "Simply type your message or send an image to start chatting!"
+    
+                    send_message(chat_id, reply_text)
+                    continue  # Skip the rest of the processing loop
+
             # implement a /help command that outputs brief explanation of commands
                 if message_text.startswith('/help'):
                     if KIOSK_MODE:
-                        reply_text = "🔒 KIOSK MODE\n\n"
+                        reply_text = "🔒 KIOSK MODE HELP\n\n"
                         reply_text += "This chatbot is running in kiosk mode with locked settings.\n\n"
                         reply_text += "Available commands:\n"
-                        reply_text += "/help - this help message\n"
+                        reply_text += "/start - show welcome message\n"
+                        reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the conversation context\n"
                         reply_text += "/status - view current chatbot status\n\n"
                         reply_text += "All other settings (model, prompt, etc.) are locked by the administrator.\n"
                         reply_text += "Simply type your message or send an image to chat!"
                     else:
                         reply_text = "Commands:\n"
-                        reply_text += "/help - this help message\n"
+                        reply_text += "/start - show welcome message\n"
+                        reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the context\n"
                         reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
                         reply_text += "/gpt3 - set the model to gpt3\n"
@@ -1596,6 +1623,18 @@ def long_polling():
                     update_model_version(chat_id, message_text)
                     reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
                     send_message(chat_id, reply_text)
+                    continue
+    
+                # Handle unrecognized commands (starts with / but doesn't match any known command)
+                elif message_text.startswith("/"):
+                    # Check if it's a recognized command that we haven't handled yet
+                    # This catches any command starting with / that hasn't been processed above
+                    if KIOSK_MODE:
+                        # In kiosk mode, provide specific guidance about available commands
+                        send_message(chat_id, "❌ Unrecognized command. In kiosk mode, only /start, /help, /clear, and /status are available. Type /help for more information.")
+                    else:
+                        # In normal mode, suggest help command
+                        send_message(chat_id, "❌ Unrecognized command. Type /help to see available commands.")
                     continue
     
     
