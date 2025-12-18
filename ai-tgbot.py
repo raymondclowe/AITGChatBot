@@ -525,7 +525,10 @@ def get_reply(message, image_data_64_list, session_id):
     
     Args:
         message: Text message from user
-        image_data_64_list: List of base64-encoded image data strings (can be empty, single, or multiple images)
+        image_data_64_list: Base64-encoded image data. Can be:
+            - None (no images)
+            - A string (single image, for backward compatibility)
+            - A list of strings (multiple images, for media groups)
         session_id: Chat session ID
     
     Returns:
@@ -1199,7 +1202,8 @@ def group_media_messages(result_list):
     
     for update in result_list:
         if 'message' not in update:
-            # Not a regular message (might be callback, etc.) - treat as regular
+            # Not a regular message (e.g., callback_query, inline_query, etc.)
+            # These are wrapped in single-item lists and handled separately in the processing loop
             regular_messages.append([update])
             continue
             
@@ -1631,7 +1635,7 @@ def long_polling():
                 
                 # Combine all captions with the message text
                 if all_captions:
-                    message_text = message_text + " \n\n " + " \n\n ".join(all_captions)
+                    message_text = message_text + '\n\n' + '\n\n'.join(all_captions)
                 
                 # Show warning only if we failed to get ANY images when photos were present
                 if is_media_group and not image_data_base64_list:
