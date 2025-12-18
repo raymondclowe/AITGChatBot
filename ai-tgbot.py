@@ -1511,7 +1511,7 @@ def long_polling():
                 if message_text.startswith('/maxrounds'):
                     # Block maxrounds changes in kiosk mode (but allow viewing)
                     if len(message_text.split()) == 1:
-                        reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
+                        reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}"
                         send_message(chat_id, reply_text)
                         continue
                     
