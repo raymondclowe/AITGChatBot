@@ -20,9 +20,20 @@ prompt_file = kiosk_prompt_example.txt
 inactivity_timeout = 3600
 
 [logging]
-# Chat logging level: off, minimum (text only), extended (text + attachments)
+# Chat logging levels: off, minimum (text only), extended (text + attachments)
+# You can set separate log levels for user and assistant messages
+# This allows fine-grained control over what gets logged
 # Default: off (no logging)
-log_chats = off
+
+# User messages logging level
+log_user_messages = off
+
+# Assistant messages logging level
+log_assistant_messages = off
+
+# Legacy single log level (deprecated but supported for backward compatibility)
+# If log_user_messages and log_assistant_messages are not set, this will be used for both
+# log_chats = off
 
 # Directory where chat logs are saved
 # Logs are organized by username and timestamped

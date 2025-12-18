@@ -143,13 +143,15 @@ KIOSK_SYSTEM_PROMPT = ""
 
 # Chat logging configuration
 # Settings loaded from kiosk.conf file and command line
-CHAT_LOG_LEVEL = 'off'  # off, minimum, extended
+CHAT_LOG_LEVEL = 'off'  # off, minimum, extended (deprecated - use separate levels)
+CHAT_LOG_LEVEL_USER = 'off'  # off, minimum, extended
+CHAT_LOG_LEVEL_ASSISTANT = 'off'  # off, minimum, extended
 CHAT_LOG_DIRECTORY = './chat_logs'
 
 def load_kiosk_config():
     """Load kiosk mode configuration from kiosk.conf file"""
     global KIOSK_MODE, KIOSK_MODEL, KIOSK_PROMPT_FILE, KIOSK_INACTIVITY_TIMEOUT, KIOSK_SYSTEM_PROMPT
-    global CHAT_LOG_LEVEL, CHAT_LOG_DIRECTORY
+    global CHAT_LOG_LEVEL, CHAT_LOG_LEVEL_USER, CHAT_LOG_LEVEL_ASSISTANT, CHAT_LOG_DIRECTORY
     
     config_file = 'kiosk.conf'
     if not os.path.exists(config_file):
@@ -167,7 +169,24 @@ def load_kiosk_config():
         
         # Parse chat logging settings from [logging] section if present
         if config.has_section('logging'):
-            CHAT_LOG_LEVEL = config.get('logging', 'log_chats', fallback='off').lower()
+            # Get legacy setting as base fallback
+            legacy_level = config.get('logging', 'log_chats', fallback='off').lower()
+            
+            # Check for new separate log levels
+            log_user = config.get('logging', 'log_user_messages', fallback=None)
+            log_assistant = config.get('logging', 'log_assistant_messages', fallback=None)
+            
+            # Use separate log levels if specified, otherwise fall back to legacy
+            if log_user is not None or log_assistant is not None:
+                # If only one is specified, the other falls back to legacy setting
+                CHAT_LOG_LEVEL_USER = log_user.lower() if log_user is not None else legacy_level
+                CHAT_LOG_LEVEL_ASSISTANT = log_assistant.lower() if log_assistant is not None else legacy_level
+            else:
+                # Use legacy setting for both if neither separate level is specified
+                CHAT_LOG_LEVEL = legacy_level
+                CHAT_LOG_LEVEL_USER = legacy_level
+                CHAT_LOG_LEVEL_ASSISTANT = legacy_level
+            
             CHAT_LOG_DIRECTORY = config.get('logging', 'log_directory', fallback='./chat_logs')
         
         print(f"Kiosk config: Loaded settings from {config_file}")
@@ -187,11 +206,19 @@ load_kiosk_config()
 # Apply command-line override for chat logging if provided
 if args.log_chats is not None:
     CHAT_LOG_LEVEL = args.log_chats
+    CHAT_LOG_LEVEL_USER = args.log_chats
+    CHAT_LOG_LEVEL_ASSISTANT = args.log_chats
 
-# Validate and normalize chat log level
-if CHAT_LOG_LEVEL not in ['off', 'minimum', 'extended']:
-    print(f"WARNING: Invalid chat log level '{CHAT_LOG_LEVEL}', defaulting to 'off'")
-    CHAT_LOG_LEVEL = 'off'
+# Validate and normalize chat log levels
+def validate_log_level(level, level_name):
+    if level not in ['off', 'minimum', 'extended']:
+        print(f"WARNING: Invalid chat log level for {level_name} '{level}', defaulting to 'off'")
+        return 'off'
+    return level
+
+CHAT_LOG_LEVEL = validate_log_level(CHAT_LOG_LEVEL, 'legacy log_chats')
+CHAT_LOG_LEVEL_USER = validate_log_level(CHAT_LOG_LEVEL_USER, 'user messages')
+CHAT_LOG_LEVEL_ASSISTANT = validate_log_level(CHAT_LOG_LEVEL_ASSISTANT, 'assistant messages')
 
 # Load system prompt from file if kiosk mode is enabled
 if KIOSK_MODE and KIOSK_PROMPT_FILE:
@@ -218,16 +245,17 @@ if KIOSK_MODE:
     print(f"   Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s" if KIOSK_INACTIVITY_TIMEOUT > 0 else "   Inactivity timeout: Disabled")
 
 # Display chat logging status
-if CHAT_LOG_LEVEL != 'off':
+if CHAT_LOG_LEVEL_USER != 'off' or CHAT_LOG_LEVEL_ASSISTANT != 'off':
     print(f"📝 CHAT LOGGING ENABLED")
-    print(f"   Level: {CHAT_LOG_LEVEL}")
+    print(f"   User messages: {CHAT_LOG_LEVEL_USER}")
+    print(f"   Assistant messages: {CHAT_LOG_LEVEL_ASSISTANT}")
     print(f"   Directory: {CHAT_LOG_DIRECTORY}")
     print(f"   ⚠️  Users will be notified that chats are being recorded")
 
 # Chat logging helper functions
 def get_chat_log_notification():
     """Get the notification message shown to users when logging is active"""
-    if CHAT_LOG_LEVEL == 'off':
+    if CHAT_LOG_LEVEL_USER == 'off' and CHAT_LOG_LEVEL_ASSISTANT == 'off':
         return None
     return "⚠️ This chat is being recorded for training and service improvement purposes."
 
@@ -281,7 +309,7 @@ def ensure_log_directory(chat_id):
     Ensure the log directory for a chat exists and return the path.
     Returns None if logging is disabled or directory creation fails.
     """
-    if CHAT_LOG_LEVEL == 'off':
+    if CHAT_LOG_LEVEL_USER == 'off' and CHAT_LOG_LEVEL_ASSISTANT == 'off':
         return None
     
     username = get_username_for_logging(chat_id)
@@ -376,7 +404,15 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         text_content: The text content of the message
         image_data: Optional image data (bytes) for extended logging
     """
-    if CHAT_LOG_LEVEL == 'off':
+    # Determine which log level to use based on role
+    if role == 'user':
+        current_log_level = CHAT_LOG_LEVEL_USER
+    elif role == 'assistant':
+        current_log_level = CHAT_LOG_LEVEL_ASSISTANT
+    else:
+        current_log_level = 'off'
+    
+    if current_log_level == 'off':
         return
     
     try:
@@ -409,7 +445,7 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
             f.write(log_entry)
         
         # Handle image logging in extended mode
-        if CHAT_LOG_LEVEL == 'extended' and image_data is not None:
+        if current_log_level == 'extended' and image_data is not None:
             # Save image in its native format (JPEG, PNG, etc.) with appropriate quality
             saved_filename, success = save_image_with_format(image_data, user_dir, timestamp_safe, role)
             
@@ -1001,7 +1037,7 @@ def get_reply(message, image_data_64_list, session_id):
     log_chat_message(session_id, 'assistant', response_text, None)
     
     # Log all images separately if in extended mode
-    if images_received and CHAT_LOG_LEVEL == 'extended':
+    if images_received and CHAT_LOG_LEVEL_ASSISTANT == 'extended':
         for idx, (image_data, mime_type) in enumerate(images_received):
             # Log each image separately with index if multiple
             image_note = f"[Image {idx+1} of {len(images_received)}]" if len(images_received) > 1 else "[Image]"
@@ -1412,21 +1448,46 @@ def long_polling():
                 continue
 
             try:
-
-            # implement a /help command that outputs brief explanation of commands
-                if message_text.startswith('/help'):
+                # implement a /start command (people expect it)
+                if message_text.startswith('/start'):
                     if KIOSK_MODE:
-                        reply_text = "🔒 KIOSK MODE\n\n"
+                        reply_text = "🔒 Welcome to KIOSK MODE\n\n"
                         reply_text += "This chatbot is running in kiosk mode with locked settings.\n\n"
                         reply_text += "Available commands:\n"
-                        reply_text += "/help - this help message\n"
+                        reply_text += "/start - show this welcome message\n"
+                        reply_text += "/help - show help information\n"
+                        reply_text += "/clear - clear the conversation context\n"
+                        reply_text += "/status - view current chatbot status\n\n"
+                        reply_text += "Simply type your message or send an image to start chatting!"
+                    else:
+                        reply_text = "👋 Welcome to AI Telegram ChatBot!\n\n"
+                        reply_text += "This bot connects to multiple AI backends including OpenAI, Anthropic, OpenRouter, and Groq.\n\n"
+                        reply_text += "Available commands:\n"
+                        reply_text += "/start - show this welcome message\n"
+                        reply_text += "/help - show detailed help\n"
+                        reply_text += "/status - view current status\n"
+                        reply_text += "/clear - clear conversation context\n\n"
+                        reply_text += "Type /help for a full list of commands and features.\n"
+                        reply_text += "Simply type your message or send an image to start chatting!"
+                    send_message(chat_id, reply_text)
+                    continue  # Skip the rest of the processing loop
+
+                # implement a /help command that outputs brief explanation of commands
+                elif message_text.startswith('/help'):
+                    if KIOSK_MODE:
+                        reply_text = "🔒 KIOSK MODE HELP\n\n"
+                        reply_text += "This chatbot is running in kiosk mode with locked settings.\n\n"
+                        reply_text += "Available commands:\n"
+                        reply_text += "/start - show welcome message\n"
+                        reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the conversation context\n"
                         reply_text += "/status - view current chatbot status\n\n"
                         reply_text += "All other settings (model, prompt, etc.) are locked by the administrator.\n"
                         reply_text += "Simply type your message or send an image to chat!"
                     else:
                         reply_text = "Commands:\n"
-                        reply_text += "/help - this help message\n"
+                        reply_text += "/start - show welcome message\n"
+                        reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the context\n"
                         reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
                         reply_text += "/gpt3 - set the model to gpt3\n"
@@ -1449,7 +1510,7 @@ def long_polling():
                     send_message(chat_id, reply_text)
                     continue  # Skip the rest of the processing loop
     
-                if message_text.startswith('/status'):
+                elif message_text.startswith('/status'):
                     current_model = session_data[chat_id]['model_version']
                     
                     # Show kiosk mode indicator at the top
@@ -1484,17 +1545,16 @@ def long_polling():
                         if KIOSK_INACTIVITY_TIMEOUT > 0:
                             reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
                     
-                    # Show chat logging status in status (always visible here)
-                    if CHAT_LOG_LEVEL != 'off':
-                        reply_text += f"\n\n📝 Chat logging: {CHAT_LOG_LEVEL}"
-                        notification = get_chat_log_notification()
-                        if notification:
-                            reply_text += f"\n{notification}"
+                    # Show chat logging status
+                    if CHAT_LOG_LEVEL_USER != 'off' or CHAT_LOG_LEVEL_ASSISTANT != 'off':
+                        reply_text += f"\n\n📝 Chat logging:"
+                        reply_text += f"\n   User: {CHAT_LOG_LEVEL_USER}"
+                        reply_text += f"\n   Assistant: {CHAT_LOG_LEVEL_ASSISTANT}"
                     
                     send_message(chat_id, reply_text)
                     continue
-    
-                if message_text.startswith('/maxrounds'):
+
+                elif message_text.startswith('/maxrounds'):
                     # Block maxrounds changes in kiosk mode (but allow viewing)
                     if len(message_text.split()) == 1:
                         reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}"
@@ -1521,14 +1581,14 @@ def long_polling():
                     continue  
     
                 # Check for command to clear context
-                if message_text.startswith('/clear'):
+                elif message_text.startswith('/clear'):
                     clear_context(chat_id)
                     reply_text = f"Context cleared"
                     send_message(chat_id, reply_text)
                     continue  # Skip the rest of the processing loop
     
                 # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
-                if message_text.startswith('/listopenroutermodels'):
+                elif message_text.startswith('/listopenroutermodels'):
                     if KIOSK_MODE:
                         send_message(chat_id, "🔒 Kiosk mode: Model listing is not available.")
                         continue
@@ -1537,7 +1597,7 @@ def long_polling():
                     continue  # Skip the rest of the processing loop
                     
                 # Handle /openrouter command in long_polling
-                if message_text.startswith("/openrouter"):
+                elif message_text.startswith("/openrouter"):
                     if KIOSK_MODE:
                         send_message(chat_id, "🔒 Kiosk mode: Model selection is locked.")
                         continue
@@ -1578,6 +1638,18 @@ def long_polling():
                     update_model_version(chat_id, message_text)
                     reply_text = f"Model has been changed to {session_data[chat_id]['model_version']}"
                     send_message(chat_id, reply_text)
+                    continue
+    
+                # Handle unrecognized commands (starts with / but doesn't match any known command)
+                elif message_text.startswith("/"):
+                    # Check if it's a recognized command that we haven't handled yet
+                    # This catches any command starting with / that hasn't been processed above
+                    if KIOSK_MODE:
+                        # In kiosk mode, provide specific guidance about available commands
+                        send_message(chat_id, "❌ Unrecognized command. In kiosk mode, only /start, /help, /clear, and /status are available. Type /help for more information.")
+                    else:
+                        # In normal mode, suggest help command
+                        send_message(chat_id, "❌ Unrecognized command. Type /help to see available commands.")
                     continue
     
     
