@@ -231,26 +231,23 @@ def get_username_for_logging(chat_id):
     username = str(chat_id).replace('/', '_').replace('\\', '_').replace('..', '_')
     return username
 
-def get_log_filepath(chat_id):
-    """Get the log file path for a chat session"""
+def ensure_log_directory(chat_id):
+    """
+    Ensure the log directory for a chat exists and return the path.
+    Returns None if logging is disabled or directory creation fails.
+    """
     if CHAT_LOG_LEVEL == 'off':
         return None
     
     username = get_username_for_logging(chat_id)
     user_dir = os.path.join(CHAT_LOG_DIRECTORY, username)
     
-    # Create directory if it doesn't exist
     try:
         os.makedirs(user_dir, exist_ok=True)
+        return user_dir
     except OSError as e:
         print(f"ERROR: Could not create chat log directory {user_dir}: {e}")
         return None
-    
-    # Generate ISO format timestamp for filename
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-    log_file = os.path.join(user_dir, f'chat_{timestamp}.txt')
-    
-    return log_file
 
 def log_chat_message(chat_id, role, text_content, image_data=None):
     """
@@ -266,11 +263,10 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         return
     
     try:
-        # Get or create log file path for this session
-        # Use a simple approach: one log file per session, append to it
-        username = get_username_for_logging(chat_id)
-        user_dir = os.path.join(CHAT_LOG_DIRECTORY, username)
-        os.makedirs(user_dir, exist_ok=True)
+        # Ensure log directory exists
+        user_dir = ensure_log_directory(chat_id)
+        if not user_dir:
+            return
         
         # Create a session-based log file (reuse same file for conversation)
         # Store the current log file in session data if session exists
@@ -286,18 +282,20 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
             if chat_id in session_data:
                 session_data[chat_id]['log_file'] = log_file
         
-        # Format the log entry
-        timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        log_entry = f"[{timestamp_str}] {role.upper()}: {text_content}\n"
+        # Generate timestamp once for consistency across all operations
+        now = datetime.now()
+        timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
+        timestamp_iso = now.strftime('%Y-%m-%dT%H-%M-%S')
         
-        # Append to log file
+        # Format and append the log entry
+        log_entry = f"[{timestamp_str}] {role.upper()}: {text_content}\n"
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(log_entry)
         
         # Handle image logging in extended mode
         if CHAT_LOG_LEVEL == 'extended' and image_data is not None:
             # Save image with same timestamp, use generic extension to preserve data
-            image_filename = os.path.join(user_dir, f'image_{datetime.now().strftime("%Y-%m-%dT%H-%M-%S")}_{role}.bin')
+            image_filename = os.path.join(user_dir, f'image_{timestamp_iso}_{role}.bin')
             with open(image_filename, 'wb') as img_file:
                 img_file.write(image_data)
             
