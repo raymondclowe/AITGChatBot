@@ -169,17 +169,20 @@ def load_kiosk_config():
         
         # Parse chat logging settings from [logging] section if present
         if config.has_section('logging'):
-            # Check for new separate log levels first
+            # Get legacy setting as base fallback
+            legacy_level = config.get('logging', 'log_chats', fallback='off').lower()
+            
+            # Check for new separate log levels
             log_user = config.get('logging', 'log_user_messages', fallback=None)
             log_assistant = config.get('logging', 'log_assistant_messages', fallback=None)
             
+            # Use separate log levels if specified, otherwise fall back to legacy
             if log_user is not None or log_assistant is not None:
-                # Use separate log levels if specified
-                CHAT_LOG_LEVEL_USER = log_user.lower() if log_user else 'off'
-                CHAT_LOG_LEVEL_ASSISTANT = log_assistant.lower() if log_assistant else 'off'
+                # If only one is specified, the other falls back to legacy setting
+                CHAT_LOG_LEVEL_USER = log_user.lower() if log_user is not None else legacy_level
+                CHAT_LOG_LEVEL_ASSISTANT = log_assistant.lower() if log_assistant is not None else legacy_level
             else:
-                # Fallback to legacy single log_chats setting for backward compatibility
-                legacy_level = config.get('logging', 'log_chats', fallback='off').lower()
+                # Use legacy setting for both if neither separate level is specified
                 CHAT_LOG_LEVEL = legacy_level
                 CHAT_LOG_LEVEL_USER = legacy_level
                 CHAT_LOG_LEVEL_ASSISTANT = legacy_level
