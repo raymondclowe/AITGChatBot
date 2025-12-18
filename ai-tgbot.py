@@ -1483,41 +1483,6 @@ def long_polling():
                         reply_text += "Image capabilities: 📷 Image input (vision)\n"
                     else:
                         reply_text += "Image capabilities: None\n"
-#-<<<<<<< copilot/allow-separate-log-levels
-                elif any(current_model.startswith(prefix) for prefix in ["gpt-4o", "gpt-4-turbo", "claude-3"]):
-                    reply_text += "Image capabilities: 📷 Image input (vision)\n"
-                else:
-                    reply_text += "Image capabilities: None\n"
-                
-                reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
-                reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
-                reply_text += f"Chatbot version: {version}\n"
-                
-                # Show kiosk-specific info
-                if KIOSK_MODE:
-                    reply_text += "\n🔒 Settings are locked by administrator"
-                    if KIOSK_INACTIVITY_TIMEOUT > 0:
-                        reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
-                
-                # Show chat logging status
-                if CHAT_LOG_LEVEL_USER != 'off' or CHAT_LOG_LEVEL_ASSISTANT != 'off':
-                    reply_text += f"\n\n📝 Chat logging:"
-                    reply_text += f"\n   User: {CHAT_LOG_LEVEL_USER}"
-                    reply_text += f"\n   Assistant: {CHAT_LOG_LEVEL_ASSISTANT}"
-                
-                send_message(chat_id, reply_text)
-                
-                # Show logging notification if active
-                notification = get_chat_log_notification()
-                if notification:
-                    send_message(chat_id, notification)
-                continue
-
-            if message_text.startswith('/maxrounds'):
-                # Block maxrounds changes in kiosk mode (but allow viewing)
-                if len(message_text.split()) == 1:
-                    reply_text = f"Max rounds is currently set to {session_data[chat_id]['max_rounds']}" 
-#-=======
                     
                     reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                     reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
@@ -1530,10 +1495,11 @@ def long_polling():
                             reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
                     
                     # Show chat logging status
-                    if CHAT_LOG_LEVEL != 'off':
-                        reply_text += f"\n\n📝 Chat logging: {CHAT_LOG_LEVEL}"
+                    if CHAT_LOG_LEVEL_USER != 'off' or CHAT_LOG_LEVEL_ASSISTANT != 'off':
+                        reply_text += f"\n\n📝 Chat logging:"
+                        reply_text += f"\n   User: {CHAT_LOG_LEVEL_USER}"
+                        reply_text += f"\n   Assistant: {CHAT_LOG_LEVEL_ASSISTANT}"
                     
-#->>>>>>> main
                     send_message(chat_id, reply_text)
                     
                     # Show logging notification if active
@@ -1541,7 +1507,7 @@ def long_polling():
                     if notification:
                         send_message(chat_id, notification)
                     continue
-    
+
                 if message_text.startswith('/maxrounds'):
                     # Block maxrounds changes in kiosk mode (but allow viewing)
                     if len(message_text.split()) == 1:
