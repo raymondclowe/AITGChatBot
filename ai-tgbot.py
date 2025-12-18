@@ -21,6 +21,13 @@ import logging
 import argparse
 import signal
 import sys
+from io import BytesIO
+try:
+    from PIL import Image
+    PILLOW_AVAILABLE = True
+except ImportError:
+    PILLOW_AVAILABLE = False
+    print("WARNING: Pillow not installed. Image logging will save files in binary format.")
 
 # Network exception types for consistent error handling
 NETWORK_EXCEPTIONS = (
@@ -257,6 +264,78 @@ def ensure_log_directory(chat_id):
         print(f"ERROR: Could not create chat log directory {user_dir}: {e}")
         return None
 
+def save_image_with_format(image_data, output_path, timestamp_safe, role):
+    """
+    Save image data in its native format with appropriate compression.
+    
+    Args:
+        image_data: Raw image bytes
+        output_path: Directory to save the image
+        timestamp_safe: Filesystem-safe timestamp string
+        role: 'user' or 'assistant'
+    
+    Returns:
+        Tuple of (saved_filename, success_boolean)
+    """
+    if not PILLOW_AVAILABLE:
+        # Fallback: save as binary if Pillow not available
+        filename = os.path.join(output_path, f'image_{timestamp_safe}_{role}.bin')
+        try:
+            with open(filename, 'wb') as f:
+                f.write(image_data)
+            return os.path.basename(filename), True
+        except Exception as e:
+            print(f"ERROR: Failed to save image as binary: {e}")
+            return None, False
+    
+    try:
+        # Open image with Pillow to detect format
+        img = Image.open(BytesIO(image_data))
+        original_format = img.format if img.format else 'JPEG'
+        
+        # Determine file extension based on format
+        format_extensions = {
+            'JPEG': 'jpg',
+            'PNG': 'png',
+            'GIF': 'gif',
+            'WEBP': 'webp',
+            'BMP': 'bmp',
+            'TIFF': 'tiff'
+        }
+        extension = format_extensions.get(original_format, 'jpg')
+        filename = f'image_{timestamp_safe}_{role}.{extension}'
+        filepath = os.path.join(output_path, filename)
+        
+        # Save based on format
+        if original_format == 'JPEG' or (original_format not in format_extensions and img.mode == 'RGB'):
+            # For JPEG or unknown RGB images, save as JPEG with quality that targets ~1MB
+            # Quality 85 is a good balance for photos with text - high quality but reasonable size
+            # Don't convert to RGB if already in correct mode to preserve quality
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            img.save(filepath, 'JPEG', quality=85, optimize=True)
+        elif original_format == 'PNG':
+            # Save PNG as-is to preserve transparency and lossless quality
+            img.save(filepath, 'PNG', optimize=True)
+        else:
+            # For other formats, save in original format
+            img.save(filepath, original_format)
+        
+        return filename, True
+        
+    except Exception as e:
+        print(f"ERROR: Failed to process image with Pillow: {e}")
+        # Fallback to binary save
+        filename = f'image_{timestamp_safe}_{role}.bin'
+        filepath = os.path.join(output_path, filename)
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(image_data)
+            return filename, True
+        except Exception as e2:
+            print(f"ERROR: Failed to save image as binary fallback: {e2}")
+            return None, False
+
 def log_chat_message(chat_id, role, text_content, image_data=None):
     """
     Log a chat message to file
@@ -301,14 +380,13 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         
         # Handle image logging in extended mode
         if CHAT_LOG_LEVEL == 'extended' and image_data is not None:
-            # Save image with same timestamp, use generic extension to preserve data
-            image_filename = os.path.join(user_dir, f'image_{timestamp_safe}_{role}.bin')
-            with open(image_filename, 'wb') as img_file:
-                img_file.write(image_data)
+            # Save image in its native format (JPEG, PNG, etc.) with appropriate quality
+            saved_filename, success = save_image_with_format(image_data, user_dir, timestamp_safe, role)
             
-            # Log reference to image file
-            with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(f"[{timestamp_display}] {role.upper()}: [IMAGE: {os.path.basename(image_filename)}]\n")
+            if success and saved_filename:
+                # Log reference to image file
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"[{timestamp_display}] {role.upper()}: [IMAGE: {saved_filename}]\n")
     
     except Exception as e:
         print(f"ERROR: Failed to log chat message: {e}")
