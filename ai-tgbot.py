@@ -225,11 +225,19 @@ def get_chat_log_notification():
     return "⚠️ This chat is being recorded for training and service improvement purposes."
 
 def get_username_for_logging(chat_id):
-    """Get a sanitized username for logging purposes"""
-    # Use chat_id as the username since we may not have access to Telegram username
-    # Convert to string and sanitize to avoid directory traversal
-    username = str(chat_id).replace('/', '_').replace('\\', '_').replace('..', '_')
-    return username
+    """
+    Get a sanitized username for logging purposes.
+    Uses chat_id which is guaranteed to be a safe integer identifier.
+    """
+    # Use chat_id as the username - it's always a numeric ID from Telegram
+    # Convert to string and use only alphanumeric characters and hyphens
+    username = str(chat_id)
+    # Additional safety: keep only alphanumeric and underscore (should already be safe)
+    sanitized = ''.join(c if c.isalnum() or c in '-_' else '_' for c in username)
+    # Ensure it's not empty and not a reserved name
+    if not sanitized or sanitized in ('.', '..', 'CON', 'PRN', 'AUX', 'NUL'):
+        sanitized = f'user_{sanitized}'
+    return sanitized
 
 def ensure_log_directory(chat_id):
     """
@@ -268,6 +276,11 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         if not user_dir:
             return
         
+        # Generate timestamps once for consistency across all operations
+        now = datetime.now()
+        timestamp_display = now.strftime('%Y-%m-%d %H:%M:%S')  # Human-readable format for log entries
+        timestamp_safe = now.strftime('%Y-%m-%dT%H-%M-%S')  # Filesystem-safe format for filenames
+        
         # Create a session-based log file (reuse same file for conversation)
         # Store the current log file in session data if session exists
         log_file = None
@@ -276,17 +289,10 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         
         # If no log file yet, create a new one
         if not log_file:
-            # Use filesystem-safe timestamp format (hyphens instead of colons)
-            timestamp_safe = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
             log_file = os.path.join(user_dir, f'chat_{timestamp_safe}.txt')
             # Store in session data if session exists (defensive check)
             if chat_id in session_data:
                 session_data[chat_id]['log_file'] = log_file
-        
-        # Generate timestamp once for consistency across all operations
-        now = datetime.now()
-        timestamp_display = now.strftime('%Y-%m-%d %H:%M:%S')  # Human-readable format for log entries
-        timestamp_safe = now.strftime('%Y-%m-%dT%H-%M-%S')  # Filesystem-safe format for filenames
         
         # Format and append the log entry
         log_entry = f"[{timestamp_display}] {role.upper()}: {text_content}\n"
@@ -853,12 +859,15 @@ def get_reply(message, image_data_64, session_id):
     session_data[session_id]["CONVERSATION"].extend(assistant_response)
     session_data[session_id]["tokens_used"] = tokens_used
     
-    # Log the assistant response
-    assistant_image_data = None
+    # Log the assistant response (text first, then images separately)
+    log_chat_message(session_id, 'assistant', response_text, None)
+    
+    # Log all images separately if in extended mode
     if images_received and CHAT_LOG_LEVEL == 'extended':
-        # Log first image if present (for simplicity)
-        assistant_image_data = images_received[0][0]
-    log_chat_message(session_id, 'assistant', response_text, assistant_image_data)
+        for idx, (image_data, mime_type) in enumerate(images_received):
+            # Log each image separately with index if multiple
+            image_note = f"[Image {idx+1} of {len(images_received)}]" if len(images_received) > 1 else "[Image]"
+            log_chat_message(session_id, 'assistant', image_note, image_data)
 
     # Optional: print the session_data for debugging
     # print(json.dumps(session_data[session_id], indent=4))
