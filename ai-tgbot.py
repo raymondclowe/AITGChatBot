@@ -276,32 +276,33 @@ def log_chat_message(chat_id, role, text_content, image_data=None):
         
         # If no log file yet, create a new one
         if not log_file:
-            timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-            log_file = os.path.join(user_dir, f'chat_{timestamp}.txt')
-            # Store in session data if session exists
+            # Use filesystem-safe timestamp format (hyphens instead of colons)
+            timestamp_safe = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+            log_file = os.path.join(user_dir, f'chat_{timestamp_safe}.txt')
+            # Store in session data if session exists (defensive check)
             if chat_id in session_data:
                 session_data[chat_id]['log_file'] = log_file
         
         # Generate timestamp once for consistency across all operations
         now = datetime.now()
-        timestamp_str = now.strftime('%Y-%m-%d %H:%M:%S')
-        timestamp_iso = now.strftime('%Y-%m-%dT%H-%M-%S')
+        timestamp_display = now.strftime('%Y-%m-%d %H:%M:%S')  # Human-readable format for log entries
+        timestamp_safe = now.strftime('%Y-%m-%dT%H-%M-%S')  # Filesystem-safe format for filenames
         
         # Format and append the log entry
-        log_entry = f"[{timestamp_str}] {role.upper()}: {text_content}\n"
+        log_entry = f"[{timestamp_display}] {role.upper()}: {text_content}\n"
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(log_entry)
         
         # Handle image logging in extended mode
         if CHAT_LOG_LEVEL == 'extended' and image_data is not None:
             # Save image with same timestamp, use generic extension to preserve data
-            image_filename = os.path.join(user_dir, f'image_{timestamp_iso}_{role}.bin')
+            image_filename = os.path.join(user_dir, f'image_{timestamp_safe}_{role}.bin')
             with open(image_filename, 'wb') as img_file:
                 img_file.write(image_data)
             
             # Log reference to image file
             with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(f"[{timestamp_str}] {role.upper()}: [IMAGE: {os.path.basename(image_filename)}]\n")
+                f.write(f"[{timestamp_display}] {role.upper()}: [IMAGE: {os.path.basename(image_filename)}]\n")
     
     except Exception as e:
         print(f"ERROR: Failed to log chat message: {e}")
