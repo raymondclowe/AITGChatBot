@@ -307,9 +307,10 @@ def save_image_with_format(image_data, output_path, timestamp_safe, role):
         filepath = os.path.join(output_path, filename)
         
         # Save based on format
-        if original_format == 'JPEG' or (original_format not in format_extensions and img.mode == 'RGB'):
-            # For JPEG or unknown RGB images, save as JPEG with quality that targets ~1MB
-            # Quality 85 is a good balance for photos with text - high quality but reasonable size
+        if _should_save_as_jpeg(original_format, img, format_extensions):
+            # For JPEG or unknown RGB images, save as JPEG with quality 85
+            # Quality 85 provides excellent quality for photos with text/handwriting
+            # while keeping file sizes reasonable (typically well under 1MB for most photos)
             # Don't convert to RGB if already in correct mode to preserve quality
             if img.mode not in ('RGB', 'L'):
                 img = img.convert('RGB')
@@ -332,9 +333,16 @@ def save_image_with_format(image_data, output_path, timestamp_safe, role):
             with open(filepath, 'wb') as f:
                 f.write(image_data)
             return filename, True
-        except Exception as e2:
-            print(f"ERROR: Failed to save image as binary fallback: {e2}")
+        except Exception as fallback_error:
+            print(f"ERROR: Failed to save image as binary fallback: {fallback_error}")
             return None, False
+
+def _should_save_as_jpeg(original_format, img, format_extensions):
+    """
+    Determine if an image should be saved as JPEG.
+    Returns True for JPEG images or unknown RGB images.
+    """
+    return original_format == 'JPEG' or (original_format not in format_extensions and img.mode == 'RGB')
 
 def log_chat_message(chat_id, role, text_content, image_data=None):
     """
