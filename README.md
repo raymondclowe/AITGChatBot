@@ -46,7 +46,8 @@ When kiosk mode is enabled:
 - System prompt is loaded from file and cannot be modified
 - `/maxrounds` changes are blocked
 - `/listopenroutermodels` is disabled
-- Only `/help`, `/clear`, and `/status` commands are available
+- Only `/start`, `/help`, `/clear`, and `/status` commands are available
+- Unrecognized commands display helpful error messages
 - Multi-user chats are still supported with separate conversation histories
 - Visual indicator (🔒) shows kiosk mode is active
 
@@ -141,6 +142,7 @@ log_chats = minimum
 - `/listopenroutermodels` - List available OpenRouter models
 
 ### Kiosk Mode
+- `/start` - Show welcome message
 - `/help` - Show kiosk mode help
 - `/clear` - Clear conversation context
 - `/status` - Show current status (with kiosk mode indicator)
