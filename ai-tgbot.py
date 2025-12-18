@@ -231,6 +231,33 @@ def get_chat_log_notification():
         return None
     return "⚠️ This chat is being recorded for training and service improvement purposes."
 
+def should_show_notification(chat_id):
+    """
+    Check if the logging notification should be shown.
+    Returns True if notification hasn't been shown today.
+    """
+    if CHAT_LOG_LEVEL == 'off':
+        return False
+    
+    if chat_id not in session_data:
+        return True
+    
+    # Get today's date
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    # Check if notification was already shown today
+    last_shown = session_data[chat_id].get('notification_shown_date')
+    if last_shown == today:
+        return False
+    
+    return True
+
+def mark_notification_shown(chat_id):
+    """Mark that the notification has been shown today"""
+    if chat_id in session_data:
+        today = datetime.now().strftime('%Y-%m-%d')
+        session_data[chat_id]['notification_shown_date'] = today
+
 def get_username_for_logging(chat_id):
     """
     Get a sanitized username for logging purposes.
@@ -446,8 +473,9 @@ def initialize_session(chat_id):
             }
         ]
     
-    # Set flag to show logging notification on first interaction
-    session['notification_needed'] = True
+    # Track when logging notification was last shown
+    # Format: 'YYYY-MM-DD' to check once per day
+    session['notification_shown_date'] = None
     session_data[chat_id] = session
     return session
 
@@ -515,8 +543,7 @@ def clear_context(chat_id):
     else:
         session_data[chat_id]['CONVERSATION'] = []
     
-    # Set flag to show logging notification after context clear
-    session_data[chat_id]['notification_needed'] = True
+    # Don't reset notification date on context clear - notification is per-session/day, not per-context
 
 
 def get_reply(message, image_data_64_list, session_id):
@@ -1376,10 +1403,6 @@ def long_polling():
                 # Update activity timestamp and check for inactivity timeout (kiosk mode)
                 if check_inactivity_timeout(chat_id):
                     send_message(chat_id, "⏰ Your session was cleared due to inactivity.")
-                    # Show logging notification after timeout clear
-                    notification = get_chat_log_notification()
-                    if notification:
-                        send_message(chat_id, notification)
 
             except Exception as e:
                 print(f"Error reading last message on line {e.__traceback__.tb_lineno}: {e}")
@@ -1458,16 +1481,14 @@ def long_polling():
                         if KIOSK_INACTIVITY_TIMEOUT > 0:
                             reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
                     
-                    # Show chat logging status
+                    # Show chat logging status in status (always visible here)
                     if CHAT_LOG_LEVEL != 'off':
                         reply_text += f"\n\n📝 Chat logging: {CHAT_LOG_LEVEL}"
+                        notification = get_chat_log_notification()
+                        if notification:
+                            reply_text += f"\n{notification}"
                     
                     send_message(chat_id, reply_text)
-                    
-                    # Show logging notification if active
-                    notification = get_chat_log_notification()
-                    if notification:
-                        send_message(chat_id, notification)
                     continue
     
                 if message_text.startswith('/maxrounds'):
@@ -1501,10 +1522,6 @@ def long_polling():
                     clear_context(chat_id)
                     reply_text = f"Context cleared"
                     send_message(chat_id, reply_text)
-                    # Show logging notification after clear
-                    notification = get_chat_log_notification()
-                    if notification:
-                        send_message(chat_id, notification)
                     continue  # Skip the rest of the processing loop
     
                 # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
@@ -1648,12 +1665,12 @@ def long_polling():
     
     
             try:
-                # Show logging notification if needed (first interaction or after context clear)
-                if session_data[chat_id].get('notification_needed', False):
+                # Show logging notification once per day (not per message)
+                if should_show_notification(chat_id):
                     notification = get_chat_log_notification()
                     if notification:
                         send_message(chat_id, notification)
-                    session_data[chat_id]['notification_needed'] = False
+                    mark_notification_shown(chat_id)
                 
                 # Get reply from OpenAI and send it back to the user
                 reply_text, tokens_used = get_reply(message_text, image_data_base64_list, chat_id)
