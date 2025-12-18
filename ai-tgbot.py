@@ -21,6 +21,13 @@ import logging
 import argparse
 import signal
 import sys
+from io import BytesIO
+try:
+    from PIL import Image
+    PILLOW_AVAILABLE = True
+except ImportError:
+    PILLOW_AVAILABLE = False
+    print("WARNING: Pillow not installed. Image logging will save files in binary format.")
 
 # Network exception types for consistent error handling
 NETWORK_EXCEPTIONS = (
@@ -48,6 +55,8 @@ parser.add_argument('--debug-log-file', type=str, default=None,
                     help='Path to the debug log file (default: ./logs/llm_debug.log)')
 parser.add_argument('--debug-log-disabled', action='store_true',
                     help='Disable debug logging')
+parser.add_argument('--log-chats', type=str, choices=['off', 'minimum', 'extended'], default=None,
+                    help='Enable chat logging: off (no logging), minimum (text only), extended (text + attachments)')
 args, _ = parser.parse_known_args()
 
 # Configure debug logging for LLM requests/responses
@@ -132,9 +141,15 @@ KIOSK_PROMPT_FILE = ''
 KIOSK_INACTIVITY_TIMEOUT = 0
 KIOSK_SYSTEM_PROMPT = ""
 
+# Chat logging configuration
+# Settings loaded from kiosk.conf file and command line
+CHAT_LOG_LEVEL = 'off'  # off, minimum, extended
+CHAT_LOG_DIRECTORY = './chat_logs'
+
 def load_kiosk_config():
     """Load kiosk mode configuration from kiosk.conf file"""
     global KIOSK_MODE, KIOSK_MODEL, KIOSK_PROMPT_FILE, KIOSK_INACTIVITY_TIMEOUT, KIOSK_SYSTEM_PROMPT
+    global CHAT_LOG_LEVEL, CHAT_LOG_DIRECTORY
     
     config_file = 'kiosk.conf'
     if not os.path.exists(config_file):
@@ -150,6 +165,11 @@ def load_kiosk_config():
         KIOSK_PROMPT_FILE = config.get('kiosk', 'prompt_file', fallback='')
         KIOSK_INACTIVITY_TIMEOUT = config.getint('kiosk', 'inactivity_timeout', fallback=0)
         
+        # Parse chat logging settings from [logging] section if present
+        if config.has_section('logging'):
+            CHAT_LOG_LEVEL = config.get('logging', 'log_chats', fallback='off').lower()
+            CHAT_LOG_DIRECTORY = config.get('logging', 'log_directory', fallback='./chat_logs')
+        
         print(f"Kiosk config: Loaded settings from {config_file}")
         
     except configparser.Error as e:
@@ -163,6 +183,15 @@ def load_kiosk_config():
 
 # Load kiosk configuration
 load_kiosk_config()
+
+# Apply command-line override for chat logging if provided
+if args.log_chats is not None:
+    CHAT_LOG_LEVEL = args.log_chats
+
+# Validate and normalize chat log level
+if CHAT_LOG_LEVEL not in ['off', 'minimum', 'extended']:
+    print(f"WARNING: Invalid chat log level '{CHAT_LOG_LEVEL}', defaulting to 'off'")
+    CHAT_LOG_LEVEL = 'off'
 
 # Load system prompt from file if kiosk mode is enabled
 if KIOSK_MODE and KIOSK_PROMPT_FILE:
@@ -187,6 +216,180 @@ if KIOSK_MODE:
     print(f"   Model: {KIOSK_MODEL}")
     print(f"   System prompt: {'Loaded' if KIOSK_SYSTEM_PROMPT else 'Not set'}")
     print(f"   Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s" if KIOSK_INACTIVITY_TIMEOUT > 0 else "   Inactivity timeout: Disabled")
+
+# Display chat logging status
+if CHAT_LOG_LEVEL != 'off':
+    print(f"📝 CHAT LOGGING ENABLED")
+    print(f"   Level: {CHAT_LOG_LEVEL}")
+    print(f"   Directory: {CHAT_LOG_DIRECTORY}")
+    print(f"   ⚠️  Users will be notified that chats are being recorded")
+
+# Chat logging helper functions
+def get_chat_log_notification():
+    """Get the notification message shown to users when logging is active"""
+    if CHAT_LOG_LEVEL == 'off':
+        return None
+    return "⚠️ This chat is being recorded for training and service improvement purposes."
+
+def get_username_for_logging(chat_id):
+    """
+    Get a sanitized username for logging purposes.
+    Uses chat_id which is guaranteed to be a safe integer identifier.
+    """
+    # Use chat_id as the username - it's always a numeric ID from Telegram
+    # Convert to string and use only alphanumeric characters and hyphens
+    username = str(chat_id)
+    # Additional safety: keep only alphanumeric and underscore (should already be safe)
+    sanitized = ''.join(c if c.isalnum() or c in '-_' else '_' for c in username)
+    # Ensure it's not empty and not a reserved name
+    if not sanitized or sanitized in ('.', '..', 'CON', 'PRN', 'AUX', 'NUL'):
+        sanitized = f'user_{sanitized}'
+    return sanitized
+
+def ensure_log_directory(chat_id):
+    """
+    Ensure the log directory for a chat exists and return the path.
+    Returns None if logging is disabled or directory creation fails.
+    """
+    if CHAT_LOG_LEVEL == 'off':
+        return None
+    
+    username = get_username_for_logging(chat_id)
+    user_dir = os.path.join(CHAT_LOG_DIRECTORY, username)
+    
+    try:
+        os.makedirs(user_dir, exist_ok=True)
+        return user_dir
+    except OSError as e:
+        print(f"ERROR: Could not create chat log directory {user_dir}: {e}")
+        return None
+
+def save_image_with_format(image_data, output_path, timestamp_safe, role):
+    """
+    Save image data in its native format with appropriate compression.
+    
+    Args:
+        image_data: Raw image bytes
+        output_path: Directory to save the image
+        timestamp_safe: Filesystem-safe timestamp string
+        role: 'user' or 'assistant'
+    
+    Returns:
+        Tuple of (saved_filename, success_boolean)
+    """
+    if not PILLOW_AVAILABLE:
+        # Fallback: save as binary if Pillow not available
+        filename = os.path.join(output_path, f'image_{timestamp_safe}_{role}.bin')
+        try:
+            with open(filename, 'wb') as f:
+                f.write(image_data)
+            return os.path.basename(filename), True
+        except Exception as e:
+            print(f"ERROR: Failed to save image as binary: {e}")
+            return None, False
+    
+    try:
+        # Open image with Pillow to detect format
+        img = Image.open(BytesIO(image_data))
+        original_format = img.format if img.format else 'JPEG'
+        
+        # Determine file extension based on format
+        format_extensions = {
+            'JPEG': 'jpg',
+            'PNG': 'png',
+            'GIF': 'gif',
+            'WEBP': 'webp',
+            'BMP': 'bmp',
+            'TIFF': 'tiff'
+        }
+        extension = format_extensions.get(original_format, 'jpg')
+        filename = f'image_{timestamp_safe}_{role}.{extension}'
+        filepath = os.path.join(output_path, filename)
+        
+        # Save based on format
+        if original_format == 'JPEG' or (original_format not in format_extensions and img.mode == 'RGB'):
+            # For JPEG or unknown RGB images, save as JPEG with quality that targets ~1MB
+            # Quality 85 is a good balance for photos with text - high quality but reasonable size
+            # Don't convert to RGB if already in correct mode to preserve quality
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            img.save(filepath, 'JPEG', quality=85, optimize=True)
+        elif original_format == 'PNG':
+            # Save PNG as-is to preserve transparency and lossless quality
+            img.save(filepath, 'PNG', optimize=True)
+        else:
+            # For other formats, save in original format
+            img.save(filepath, original_format)
+        
+        return filename, True
+        
+    except Exception as e:
+        print(f"ERROR: Failed to process image with Pillow: {e}")
+        # Fallback to binary save
+        filename = f'image_{timestamp_safe}_{role}.bin'
+        filepath = os.path.join(output_path, filename)
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(image_data)
+            return filename, True
+        except Exception as e2:
+            print(f"ERROR: Failed to save image as binary fallback: {e2}")
+            return None, False
+
+def log_chat_message(chat_id, role, text_content, image_data=None):
+    """
+    Log a chat message to file
+    
+    Args:
+        chat_id: The Telegram chat ID
+        role: 'user' or 'assistant'
+        text_content: The text content of the message
+        image_data: Optional image data (bytes) for extended logging
+    """
+    if CHAT_LOG_LEVEL == 'off':
+        return
+    
+    try:
+        # Ensure log directory exists
+        user_dir = ensure_log_directory(chat_id)
+        if not user_dir:
+            return
+        
+        # Generate timestamps once for consistency across all operations
+        now = datetime.now()
+        timestamp_display = now.strftime('%Y-%m-%d %H:%M:%S')  # Human-readable format for log entries
+        timestamp_safe = now.strftime('%Y-%m-%dT%H-%M-%S')  # Filesystem-safe format for filenames
+        
+        # Create a session-based log file (reuse same file for conversation)
+        # Store the current log file in session data if session exists
+        log_file = None
+        if chat_id in session_data and 'log_file' in session_data[chat_id]:
+            log_file = session_data[chat_id]['log_file']
+        
+        # If no log file yet, create a new one
+        if not log_file:
+            log_file = os.path.join(user_dir, f'chat_{timestamp_safe}.txt')
+            # Store in session data if session exists (defensive check)
+            if chat_id in session_data:
+                session_data[chat_id]['log_file'] = log_file
+        
+        # Format and append the log entry
+        log_entry = f"[{timestamp_display}] {role.upper()}: {text_content}\n"
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(log_entry)
+        
+        # Handle image logging in extended mode
+        if CHAT_LOG_LEVEL == 'extended' and image_data is not None:
+            # Save image in its native format (JPEG, PNG, etc.) with appropriate quality
+            saved_filename, success = save_image_with_format(image_data, user_dir, timestamp_safe, role)
+            
+            if success and saved_filename:
+                # Log reference to image file
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"[{timestamp_display}] {role.upper()}: [IMAGE: {saved_filename}]\n")
+    
+    except Exception as e:
+        print(f"ERROR: Failed to log chat message: {e}")
 
 # Set the URL for the API
 OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
@@ -243,6 +446,8 @@ def initialize_session(chat_id):
             }
         ]
     
+    # Set flag to show logging notification on first interaction
+    session['notification_needed'] = True
     session_data[chat_id] = session
     return session
 
@@ -309,6 +514,9 @@ def clear_context(chat_id):
         ]
     else:
         session_data[chat_id]['CONVERSATION'] = []
+    
+    # Set flag to show logging notification after context clear
+    session_data[chat_id]['notification_needed'] = True
 
 
 def get_reply(message, image_data_64, session_id):
@@ -338,6 +546,7 @@ def get_reply(message, image_data_64, session_id):
             # "datetime": datetime.now(),
         }
     ]
+    user_image_data = None
     if image_data_64:  # If there's a new image, include it in the user's message
         has_image = True
         image_content_item = {
@@ -345,6 +554,12 @@ def get_reply(message, image_data_64, session_id):
             "image_url": {"url": f"data:image/jpeg;base64,{image_data_64}"},
         }
         new_user_message[0]["content"].append(image_content_item)
+        # Store image data for logging
+        user_image_data = base64.b64decode(image_data_64)
+    
+    # Log the user message
+    log_chat_message(session_id, 'user', message, user_image_data)
+    
     # Update the conversation with the new user message
     session_data[session_id]["CONVERSATION"].extend(new_user_message)
 
@@ -721,6 +936,16 @@ def get_reply(message, image_data_64, session_id):
     ]
     session_data[session_id]["CONVERSATION"].extend(assistant_response)
     session_data[session_id]["tokens_used"] = tokens_used
+    
+    # Log the assistant response (text first, then images separately)
+    log_chat_message(session_id, 'assistant', response_text, None)
+    
+    # Log all images separately if in extended mode
+    if images_received and CHAT_LOG_LEVEL == 'extended':
+        for idx, (image_data, mime_type) in enumerate(images_received):
+            # Log each image separately with index if multiple
+            image_note = f"[Image {idx+1} of {len(images_received)}]" if len(images_received) > 1 else "[Image]"
+            log_chat_message(session_id, 'assistant', image_note, image_data)
 
     # Optional: print the session_data for debugging
     # print(json.dumps(session_data[session_id], indent=4))
@@ -1072,6 +1297,10 @@ def long_polling():
             # Update activity timestamp and check for inactivity timeout (kiosk mode)
             if check_inactivity_timeout(chat_id):
                 send_message(chat_id, "⏰ Your session was cleared due to inactivity.")
+                # Show logging notification after timeout clear
+                notification = get_chat_log_notification()
+                if notification:
+                    send_message(chat_id, notification)
 
         except Exception as e:
             print(f"Error reading last message on line {e.__traceback__.tb_lineno}: {e}")
@@ -1150,7 +1379,16 @@ def long_polling():
                     if KIOSK_INACTIVITY_TIMEOUT > 0:
                         reply_text += f"\n⏰ Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s"
                 
+                # Show chat logging status
+                if CHAT_LOG_LEVEL != 'off':
+                    reply_text += f"\n\n📝 Chat logging: {CHAT_LOG_LEVEL}"
+                
                 send_message(chat_id, reply_text)
+                
+                # Show logging notification if active
+                notification = get_chat_log_notification()
+                if notification:
+                    send_message(chat_id, notification)
                 continue
 
             if message_text.startswith('/maxrounds'):
@@ -1184,6 +1422,10 @@ def long_polling():
                 clear_context(chat_id)
                 reply_text = f"Context cleared"
                 send_message(chat_id, reply_text)
+                # Show logging notification after clear
+                notification = get_chat_log_notification()
+                if notification:
+                    send_message(chat_id, notification)
                 continue  # Skip the rest of the processing loop
 
             # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
@@ -1309,8 +1551,15 @@ def long_polling():
             continue
 
 
-        try:            
-           # Get reply from OpenAI and send it back to the user
+        try:
+            # Show logging notification if needed (first interaction or after context clear)
+            if session_data[chat_id].get('notification_needed', False):
+                notification = get_chat_log_notification()
+                if notification:
+                    send_message(chat_id, notification)
+                session_data[chat_id]['notification_needed'] = False
+            
+            # Get reply from OpenAI and send it back to the user
             reply_text, tokens_used = get_reply(message_text, image_data_base64, chat_id)
             # Update activity timestamp after successful interaction
             update_activity(chat_id)
