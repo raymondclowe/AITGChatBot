@@ -647,7 +647,7 @@ def get_reply(message, image_data_64_list, session_id):
     
     # Log the user message (text first, then images separately in extended mode)
     log_chat_message(session_id, 'user', message, None)
-    if user_image_data_list and CHAT_LOG_LEVEL == 'extended':
+    if user_image_data_list and CHAT_LOG_LEVEL_USER == 'extended':
         for idx, image_data in enumerate(user_image_data_list):
             image_note = f"[User Image {idx+1} of {len(user_image_data_list)}]" if len(user_image_data_list) > 1 else "[User Image]"
             log_chat_message(session_id, 'user', image_note, image_data)
