@@ -262,32 +262,29 @@ def get_chat_log_notification():
 def should_show_notification(chat_id):
     """
     Check if the logging notification should be shown.
-    Returns True if notification hasn't been shown today.
+    Returns True if notification hasn't been shown in this session (first use only).
     """
-    if CHAT_LOG_LEVEL == 'off':
+    # Check if logging is enabled for either user or assistant
+    if CHAT_LOG_LEVEL_USER == 'off' and CHAT_LOG_LEVEL_ASSISTANT == 'off':
         return False
     
     if chat_id not in session_data:
         # Session should exist at this point, but be defensive
         initialize_session(chat_id)
     
-    # Get today's date
-    today = datetime.now().strftime('%Y-%m-%d')
-    
-    # Check if notification was already shown today
-    last_shown = session_data[chat_id].get('notification_shown_date')
-    if last_shown == today:
+    # Check if notification was already shown in this session
+    notification_shown = session_data[chat_id].get('notification_shown', False)
+    if notification_shown:
         return False
     
     return True
 
 def mark_notification_shown(chat_id):
-    """Mark that the notification has been shown today"""
+    """Mark that the notification has been shown in this session"""
     if chat_id not in session_data:
         # Initialize session if it doesn't exist (defensive programming)
         initialize_session(chat_id)
-    today = datetime.now().strftime('%Y-%m-%d')
-    session_data[chat_id]['notification_shown_date'] = today
+    session_data[chat_id]['notification_shown'] = True
 
 def get_username_for_logging(chat_id):
     """
@@ -512,9 +509,8 @@ def initialize_session(chat_id):
             }
         ]
     
-    # Track when logging notification was last shown
-    # Format: 'YYYY-MM-DD' to check once per day
-    session['notification_shown_date'] = None
+    # Track whether logging notification has been shown in this session
+    session['notification_shown'] = False
     session_data[chat_id] = session
     return session
 
@@ -582,7 +578,7 @@ def clear_context(chat_id):
     else:
         session_data[chat_id]['CONVERSATION'] = []
     
-    # Don't reset notification date on context clear - notification is per-session/day, not per-context
+    # Don't reset notification flag on context clear - notification is per-session (first use only)
 
 
 def get_reply(message, image_data_64_list, session_id):
@@ -651,7 +647,7 @@ def get_reply(message, image_data_64_list, session_id):
     
     # Log the user message (text first, then images separately in extended mode)
     log_chat_message(session_id, 'user', message, None)
-    if user_image_data_list and CHAT_LOG_LEVEL == 'extended':
+    if user_image_data_list and CHAT_LOG_LEVEL_USER == 'extended':
         for idx, image_data in enumerate(user_image_data_list):
             image_note = f"[User Image {idx+1} of {len(user_image_data_list)}]" if len(user_image_data_list) > 1 else "[User Image]"
             log_chat_message(session_id, 'user', image_note, image_data)
@@ -1740,7 +1736,7 @@ def long_polling():
     
     
             try:
-                # Show logging notification once per day (not per message)
+                # Show logging notification on first use only (not per message)
                 if should_show_notification(chat_id):
                     notification = get_chat_log_notification()
                     if notification:
