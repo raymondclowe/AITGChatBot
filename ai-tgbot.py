@@ -143,6 +143,22 @@ KIOSK_PROMPT_FILE = ''
 KIOSK_INACTIVITY_TIMEOUT = 0
 KIOSK_SYSTEM_PROMPT = ""
 
+# Image generation constants for kiosk mode
+# Instruction text added to system prompts for image-capable models
+IMAGE_TEXT_INSTRUCTION = (
+    "\n\n**IMPORTANT**: When generating images, always provide BOTH:\n"
+    "1. A generated image that directly addresses the request\n"
+    "2. A clear text explanation (1-3 sentences) describing what the image shows\n"
+    "Never generate only an image without accompanying text explanation."
+)
+
+# Keywords that indicate a user is requesting image generation
+IMAGE_REQUEST_KEYWORDS = [
+    'draw', 'sketch', 'diagram', 'illustrate', 'visualize', 'show me',
+    'picture', 'image', 'graph', 'chart', 'plot', 'create',
+    'generate', 'make', 'design'
+]
+
 # Chat logging configuration
 # Settings loaded from kiosk.conf file and command line
 CHAT_LOG_LEVEL = 'off'  # off, minimum, extended (deprecated - use separate levels)
@@ -508,13 +524,7 @@ def initialize_session(chat_id):
         
         # Enhance prompt for image-capable models to request both image and text
         if model_supports_image_output(model):
-            image_instruction = (
-                "\n\n**IMPORTANT**: When generating images, always provide BOTH:\n"
-                "1. A generated image that directly addresses the request\n"
-                "2. A clear text explanation (1-3 sentences) describing what the image shows\n"
-                "Never generate only an image without accompanying text explanation."
-            )
-            system_prompt_text = system_prompt_text + image_instruction
+            system_prompt_text = system_prompt_text + IMAGE_TEXT_INSTRUCTION
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Kiosk mode: Enhanced system prompt for image-capable model {model}")
         
         session['CONVERSATION'] = [
@@ -589,12 +599,7 @@ def clear_context(chat_id):
         
         # Enhance prompt for image-capable models to request both image and text
         if model_supports_image_output(model):
-            image_instruction = (
-                "\n\n**IMPORTANT**: When generating images, always provide BOTH:\n"
-                "1. A generated image that directly addresses the request\n"
-                "2. A clear text explanation (1-3 sentences) describing what the image shows\n"
-                "Never generate only an image without accompanying text explanation."
-            )
+            system_prompt_text = system_prompt_text + IMAGE_TEXT_INSTRUCTION
             system_prompt_text = system_prompt_text + image_instruction
         
         session_data[chat_id]['CONVERSATION'] = [
@@ -650,15 +655,9 @@ def get_reply(message, image_data_64_list, session_id):
     
     if KIOSK_MODE and model_supports_image_output(model):
         # Keywords that suggest the user is asking for an image/diagram/visualization
-        image_request_keywords = [
-            'draw', 'sketch', 'diagram', 'illustrate', 'visualize', 'show me',
-            'picture', 'image', 'graph', 'chart', 'plot', 'create',
-            'generate', 'make', 'design'
-        ]
-        
         message_lower = message.lower()
         # Check if the message contains any image request keywords
-        if any(keyword in message_lower for keyword in image_request_keywords):
+        if any(keyword in message_lower for keyword in IMAGE_REQUEST_KEYWORDS):
             # Append instruction to ensure both image and text are provided
             user_message_text = message + "\n\n(Please provide both a visual representation AND a text explanation.)"
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Kiosk mode: Enhanced user prompt for image request")

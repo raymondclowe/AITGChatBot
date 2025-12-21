@@ -117,11 +117,8 @@ def test_image_request_keyword_detection():
         ("Help me with this math problem", False),
     ]
     
-    image_request_keywords = [
-        'draw', 'sketch', 'diagram', 'illustrate', 'visualize', 'show me',
-        'picture', 'image', 'graph', 'chart', 'plot', 'create',
-        'generate', 'make', 'design'
-    ]
+    # Import the keywords from the main module
+    image_request_keywords = aitgbot.IMAGE_REQUEST_KEYWORDS
     
     passed = 0
     failed = 0
