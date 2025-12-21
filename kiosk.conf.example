@@ -39,3 +39,21 @@ log_assistant_messages = off
 # Logs are organized by username and timestamped
 # Default: ./chat_logs
 log_directory = ./chat_logs
+
+[PluginConfig]
+# Enable the plugin system (true/false)
+# When enabled, the bot will load kiosk-custom.py if present
+# Plugins provide extensible AI-powered transformations and custom logic
+enabled = true
+
+# Maximum execution time for plugin hooks in seconds
+# Hooks that exceed this timeout will be cancelled
+timeout = 5.0
+
+# Maximum number of failures before plugin is automatically disabled
+# Helps prevent poorly-behaved plugins from disrupting the bot
+max_failures = 3
+
+# Enable debug logging for plugin execution
+# Useful for plugin development and troubleshooting
+debug = false

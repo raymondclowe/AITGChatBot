@@ -1,4 +1,4 @@
-version = "1.8.0"
+version = "1.9.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -10,6 +10,7 @@ version = "1.8.0"
 # 1.7.0 - kiosk mode for locked-down dedicated instances
 # 1.7.1 - fix missing text description when image is generated (reasoning field fallback)
 # 1.8.0 - ensure image-capable models in kiosk mode return both image and text
+# 1.9.0 - extensible plugin system for kiosk mode with AI-powered transformations
 
 import requests
 import base64
@@ -166,10 +167,18 @@ CHAT_LOG_LEVEL_USER = 'off'  # off, minimum, extended
 CHAT_LOG_LEVEL_ASSISTANT = 'off'  # off, minimum, extended
 CHAT_LOG_DIRECTORY = './chat_logs'
 
+# Plugin system configuration
+# Settings loaded from kiosk.conf file
+PLUGIN_ENABLED = True
+PLUGIN_TIMEOUT = 5.0
+PLUGIN_MAX_FAILURES = 3
+PLUGIN_DEBUG = False
+
 def load_kiosk_config():
     """Load kiosk mode configuration from kiosk.conf file"""
     global KIOSK_MODE, KIOSK_MODEL, KIOSK_PROMPT_FILE, KIOSK_INACTIVITY_TIMEOUT, KIOSK_SYSTEM_PROMPT
     global CHAT_LOG_LEVEL, CHAT_LOG_LEVEL_USER, CHAT_LOG_LEVEL_ASSISTANT, CHAT_LOG_DIRECTORY
+    global PLUGIN_ENABLED, PLUGIN_TIMEOUT, PLUGIN_MAX_FAILURES, PLUGIN_DEBUG
     
     config_file = 'kiosk.conf'
     if not os.path.exists(config_file):
@@ -206,6 +215,13 @@ def load_kiosk_config():
                 CHAT_LOG_LEVEL_ASSISTANT = legacy_level
             
             CHAT_LOG_DIRECTORY = config.get('logging', 'log_directory', fallback='./chat_logs')
+        
+        # Parse plugin settings from [PluginConfig] section if present
+        if config.has_section('PluginConfig'):
+            PLUGIN_ENABLED = config.get('PluginConfig', 'enabled', fallback='true').lower() == 'true'
+            PLUGIN_TIMEOUT = config.getfloat('PluginConfig', 'timeout', fallback=5.0)
+            PLUGIN_MAX_FAILURES = config.getint('PluginConfig', 'max_failures', fallback=3)
+            PLUGIN_DEBUG = config.get('PluginConfig', 'debug', fallback='false').lower() == 'true'
         
         print(f"Kiosk config: Loaded settings from {config_file}")
         
@@ -261,6 +277,30 @@ if KIOSK_MODE:
     print(f"   Model: {KIOSK_MODEL}")
     print(f"   System prompt: {'Loaded' if KIOSK_SYSTEM_PROMPT else 'Not set'}")
     print(f"   Inactivity timeout: {KIOSK_INACTIVITY_TIMEOUT}s" if KIOSK_INACTIVITY_TIMEOUT > 0 else "   Inactivity timeout: Disabled")
+
+# Initialize plugin manager if kiosk mode is enabled
+plugin_manager = None
+if KIOSK_MODE and PLUGIN_ENABLED:
+    try:
+        from kiosk_plugin_base import PluginConfig
+        from kiosk_plugin_manager import PluginManager
+        
+        # Create plugin config
+        plugin_config = PluginConfig()
+        plugin_config.enabled = PLUGIN_ENABLED
+        plugin_config.timeout = PLUGIN_TIMEOUT
+        plugin_config.max_failures = PLUGIN_MAX_FAILURES
+        plugin_config.debug = PLUGIN_DEBUG
+        
+        # Initialize plugin manager (will be fully initialized after session_data exists)
+        # We'll set it up properly before first use
+        print(f"🔌 Plugin system enabled (timeout: {PLUGIN_TIMEOUT}s, max_failures: {PLUGIN_MAX_FAILURES})")
+    except ImportError as e:
+        print(f"⚠️  Failed to import plugin system: {e}")
+        PLUGIN_ENABLED = False
+    except Exception as e:
+        print(f"⚠️  Failed to initialize plugin system: {e}")
+        PLUGIN_ENABLED = False
 
 # Display chat logging status
 if CHAT_LOG_LEVEL_USER != 'off' or CHAT_LOG_LEVEL_ASSISTANT != 'off':
@@ -495,6 +535,28 @@ session_data = {}
 # default conversation max rounds is 4 which is double the previous version of the bot
 DEFAULT_MAX_ROUNDS = 4
 
+# Initialize plugin manager after session_data exists
+if KIOSK_MODE and PLUGIN_ENABLED and plugin_manager is None:
+    try:
+        from kiosk_plugin_base import PluginConfig
+        from kiosk_plugin_manager import PluginManager
+        
+        plugin_config = PluginConfig()
+        plugin_config.enabled = PLUGIN_ENABLED
+        plugin_config.timeout = PLUGIN_TIMEOUT
+        plugin_config.max_failures = PLUGIN_MAX_FAILURES
+        plugin_config.debug = PLUGIN_DEBUG
+        
+        plugin_manager = PluginManager(
+            config=plugin_config,
+            session_data=session_data,
+            openrouter_api_key=OPENROUTER_API_KEY,
+            openrouter_url="https://openrouter.ai/api/v1/chat/completions"
+        )
+    except Exception as e:
+        print(f"⚠️  Failed to fully initialize plugin manager: {e}")
+        plugin_manager = None
+
 
 def get_default_model():
     """Get the default model based on kiosk mode setting"""
@@ -537,6 +599,14 @@ def initialize_session(chat_id):
     # Track whether logging notification has been shown in this session
     session['notification_shown'] = False
     session_data[chat_id] = session
+    
+    # Call plugin hook for session start
+    if plugin_manager:
+        try:
+            plugin_manager.on_session_start(chat_id)
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin on_session_start: {e}")
+    
     return session
 
 
@@ -652,14 +722,28 @@ def get_reply(message, image_data_64_list, session_id):
     user_message_text = message
     model = session_data[session_id]["model_version"]
     
+    # Plugin hook: pre_user_text
+    if plugin_manager and KIOSK_MODE:
+        try:
+            user_message_text = plugin_manager.pre_user_text(user_message_text, session_id)
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin pre_user_text: {e}")
+    
     if KIOSK_MODE and model_supports_image_output(model):
         # Keywords that suggest the user is asking for an image/diagram/visualization
-        message_lower = message.lower()
+        message_lower = user_message_text.lower()
         # Check if the message contains any image request keywords
         if any(keyword in message_lower for keyword in IMAGE_REQUEST_KEYWORDS):
             # Append instruction to ensure both image and text are provided
-            user_message_text = message + "\n\n(Please provide both a visual representation AND a text explanation.)"
+            user_message_text = user_message_text + "\n\n(Please provide both a visual representation AND a text explanation.)"
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Kiosk mode: Enhanced user prompt for image request")
+    
+    # Plugin hook: post_user_text
+    if plugin_manager and KIOSK_MODE:
+        try:
+            user_message_text = plugin_manager.post_user_text(user_message_text, session_id)
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_user_text: {e}")
     
     new_user_message = [
         {
@@ -676,6 +760,13 @@ def get_reply(message, image_data_64_list, session_id):
         # Legacy support: convert single string to list
         image_data_64_list = [image_data_64_list]
     
+    # Plugin hook: pre_user_images
+    if plugin_manager and KIOSK_MODE and image_data_64_list:
+        try:
+            image_data_64_list = plugin_manager.pre_user_images(image_data_64_list, user_message_text, session_id)
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin pre_user_images: {e}")
+    
     # Add all images to the user message
     user_image_data_list = []
     if image_data_64_list:
@@ -690,6 +781,28 @@ def get_reply(message, image_data_64_list, session_id):
             # Store image data for logging
             user_image_data_list.append(base64.b64decode(image_data_64))
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]   Image {idx+1}: {len(image_data_64)} chars base64 ({len(user_image_data_list[idx])} bytes)")
+    
+    # Plugin hook: post_user_images
+    if plugin_manager and KIOSK_MODE and image_data_64_list:
+        try:
+            # Extract just the base64 strings for the hook
+            b64_list = [img_data_64 for img_data_64 in image_data_64_list]
+            b64_list = plugin_manager.post_user_images(b64_list, user_message_text, session_id)
+            # Update if changed
+            if b64_list != image_data_64_list:
+                image_data_64_list = b64_list
+                # Need to rebuild the message content with new images
+                new_user_message[0]["content"] = [{"type": "text", "text": user_message_text}]
+                user_image_data_list = []
+                for idx, image_data_64 in enumerate(image_data_64_list):
+                    image_content_item = {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_data_64}"},
+                    }
+                    new_user_message[0]["content"].append(image_content_item)
+                    user_image_data_list.append(base64.b64decode(image_data_64))
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_user_images: {e}")
     
     # Log the user message (text first, then images separately in extended mode)
     log_chat_message(session_id, 'user', message, None)
@@ -1030,6 +1143,31 @@ def get_reply(message, image_data_64_list, session_id):
                 response_text = "(Image generated without text description)"
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] WARNING: Image-capable model returned image(s) without text description")
             
+            # Plugin hook: pre_assistant_text
+            if plugin_manager and KIOSK_MODE and response_text:
+                try:
+                    response_text = plugin_manager.pre_assistant_text(response_text, session_id)
+                except Exception as e:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin pre_assistant_text: {e}")
+            
+            # Plugin hook: pre_assistant_images
+            if plugin_manager and KIOSK_MODE and images_received:
+                try:
+                    # Convert images to base64 list for hook
+                    images_b64 = [base64.b64encode(img_data).decode('utf-8') for img_data, _ in images_received]
+                    images_b64 = plugin_manager.pre_assistant_images(images_b64, response_text, session_id)
+                    # Convert back to binary format with mime types
+                    if images_b64:
+                        new_images_received = []
+                        for i, b64_img in enumerate(images_b64):
+                            img_data = base64.b64decode(b64_img)
+                            # Preserve original mime type if available
+                            mime_type = images_received[i][1] if i < len(images_received) else 'image/jpeg'
+                            new_images_received.append((img_data, mime_type))
+                        images_received = new_images_received
+                except Exception as e:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin pre_assistant_images: {e}")
+            
             # Send any images to Telegram
             for image_data, mime_type in images_received:
                 send_image_to_telegram(session_id, image_data, mime_type)
@@ -1091,6 +1229,28 @@ def get_reply(message, image_data_64_list, session_id):
     ]
     session_data[session_id]["CONVERSATION"].extend(assistant_response)
     session_data[session_id]["tokens_used"] = tokens_used
+    
+    # Plugin hook: post_assistant_text
+    if plugin_manager and KIOSK_MODE and response_text:
+        try:
+            response_text = plugin_manager.post_assistant_text(response_text, session_id)
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_assistant_text: {e}")
+    
+    # Plugin hook: post_assistant_images (before sending to user)
+    if plugin_manager and KIOSK_MODE and images_received:
+        try:
+            # Convert images to base64 list for hook
+            images_b64 = [base64.b64encode(img_data).decode('utf-8') for img_data, _ in images_received]
+            images_b64 = plugin_manager.post_assistant_images(images_b64, response_text, session_id)
+            # If plugin added new images, send them to Telegram
+            if len(images_b64) > len(images_received):
+                for i in range(len(images_received), len(images_b64)):
+                    img_data = base64.b64decode(images_b64[i])
+                    mime_type = 'image/png'  # Default for plugin-generated images
+                    send_image_to_telegram(session_id, img_data, mime_type)
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_assistant_images: {e}")
     
     # Log the assistant response (text first, then images separately)
     log_chat_message(session_id, 'assistant', response_text, None)
@@ -1847,6 +2007,13 @@ def long_polling():
                 # Only send text message if there's actual content to send
                 if reply_text and reply_text.strip():
                     send_message(chat_id, reply_text)
+                
+                # Plugin hook: on_message_complete (after full exchange)
+                if plugin_manager and KIOSK_MODE:
+                    try:
+                        plugin_manager.on_message_complete(chat_id)
+                    except Exception as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin on_message_complete: {e}")
     
             except Exception as e:
                 print(f"Error getting reply  on line {e.__traceback__.tb_lineno}: {e}")
