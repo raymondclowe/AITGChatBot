@@ -600,7 +600,6 @@ def clear_context(chat_id):
         # Enhance prompt for image-capable models to request both image and text
         if model_supports_image_output(model):
             system_prompt_text = system_prompt_text + IMAGE_TEXT_INSTRUCTION
-            system_prompt_text = system_prompt_text + image_instruction
         
         session_data[chat_id]['CONVERSATION'] = [
             {
