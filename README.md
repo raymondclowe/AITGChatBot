@@ -146,3 +146,19 @@ log_chats = minimum
 - `/help` - Show kiosk mode help
 - `/clear` - Clear conversation context
 - `/status` - Show current status (with kiosk mode indicator)
+
+## Developer Notes
+
+### Image Generation and Reasoning Field
+
+When using models like Google Gemini via OpenRouter for image generation, the API may return explanatory text in different fields:
+
+- **Standard behavior**: Text content is in the `content` field
+- **Image generation (Gemini/OpenRouter)**: When an image is generated, the `content` field may be empty and the explanatory/descriptive text is instead placed in a `reasoning` field
+
+The bot automatically handles this by:
+1. Checking the `content` field first (primary source for text)
+2. If `content` is empty but images are present, falling back to the `reasoning` field
+3. This ensures users see both generated images and the AI's explanation/description
+
+This behavior is logged in debug output when it occurs. See the debug logs (if enabled) for details on response structure.
