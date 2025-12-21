@@ -160,3 +160,14 @@ cython_debug/
 #.idea/
 .vscode/launch.json
 .aider*
+
+# Debug log files and logs directory
+logs/
+llm_debug.log
+*.debug.log
+
+# Chat logs directory
+chat_logs/
+
+# Local kiosk configuration (use kiosk.conf.example as template)
+kiosk.conf

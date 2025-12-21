@@ -3,28 +3,39 @@ An AI LLM powered Telegram ChatBot with switchable backends; supports OpenAI, Mi
 
 ## Features
 
-### 🎭 Profile System (New in v1.7.0)
+- Multiple AI backends: OpenAI (GPT-3.5, GPT-4, GPT-4o), Anthropic Claude, OpenRouter models, and Groq (Llama 3)
+- Image input/output support for vision and image generation models
+- Conversation history with configurable max rounds
+- **Profile System** for switching between AI personalities
+- **LaTeX Support** for rendering mathematical equations
+- **Kiosk Mode** for locked-down, dedicated use cases
+
+## Profile System
+
 Switch between different AI personalities and configurations using profile files. Perfect for creating specialized assistants for different use cases.
 
-**Available Commands:**
+### Profile Commands
 - `/activate <profile>` - Activate a profile
 - `/listprofiles` - Show all available profiles  
 - `/currentprofile` - Show current active profile
 - `/deactivate` - Return to default configuration
 
-**Included Profiles:**
-- **pirate** - A fun pirate-themed assistant that speaks in pirate slang
-- **tutor_ib** - An IB Math and Physics tutor using Socratic method
-
-**Profile Format:**
+### Profile Format
 Create your own `.profile` files in the `profiles/` directory:
 ```
 Line 1: Model name (e.g., gpt-4o-mini, openrouter:anthropic/claude-3-opus)
 Line 2: Greeting message
-Line 3+: System prompt (can span multiple lines)
+Line 3: Personality name
+Line 4+: System prompt (can span multiple lines)
 ```
 
-### 📐 LaTeX Support (New in v1.7.0)
+### Included Profiles
+- **eec** - Emergency Education Chatbot for IB Math and Physics
+- **ib_tutor** - IB Math and Physics tutor using Socratic method
+- **pirate** - A fun pirate-themed assistant
+
+## LaTeX Support
+
 Automatically detects and renders mathematical equations in LaTeX format as images.
 
 **Supported Formats:**
@@ -37,51 +48,71 @@ Automatically detects and renders mathematical equations in LaTeX format as imag
   ````
 - LaTeX display: `\[integral equation\]`
 
-The bot will automatically detect LaTeX in AI responses, render them as PNG images using matplotlib, and send them to Telegram with the original LaTeX as a caption.
+The bot will automatically detect LaTeX in AI responses, render them as PNG images using matplotlib, and send them to Telegram.
 
-### 🤖 Model Selection
-Switch between different AI models on the fly:
-- `/gpt3` - OpenAI GPT-3.5 Turbo
-- `/gpt4` - OpenAI GPT-4 Turbo
-- `/gpt4o` - OpenAI GPT-4o
-- `/gpt4omini` - OpenAI GPT-4o Mini (default)
-- `/claud3opus` - Anthropic Claude 3 Opus
-- `/claud3haiku` - Anthropic Claude 3 Haiku
-- `/llama38b` - Llama 3 8B via Groq
-- `/llama370b` - Llama 3 70B via Groq
-- `/openrouter <model>` - Any OpenRouter model
-- `/listopenroutermodels` - List all available OpenRouter models
+## Environment Variables
 
-### 📷 Image Support
-- Send images with text to vision-capable models for analysis
-- Models with 📷 support image input (vision)
-- Models with 🎨 support image output (generation)
+### Required
+- `BOT_KEY` - Telegram bot token
+- `API_KEY` - OpenAI API key
+- `ANTHROPIC_API_KEY` - Anthropic API key (for Claude models)
+- `OPENROUTER_API_KEY` - OpenRouter API key
+- `GROQ_API_KEY` - Groq API key (for Llama models)
 
-### 💬 Conversation Management
-- `/clear` - Clear conversation context
-- `/maxrounds <n>` - Set maximum conversation rounds
-- `/status` - Show current bot status
-- `/help` - Display all available commands
+## Kiosk Mode
+
+Kiosk mode provides a locked-down instance ideal for educational environments, public terminals, or dedicated single-purpose bots.
+
+### Configuration
+
+Kiosk mode is configured via `kiosk.conf` file. Copy `kiosk.conf.example` to `kiosk.conf` and modify as needed:
+
+```ini
+[kiosk]
+# Enable kiosk mode (true/false)
+enabled = true
+
+# The model to use in kiosk mode
+model = openrouter:google/gemini-2.0-flash-001
+
+# Path to the system prompt file
+prompt_file = kiosk_prompt_example.txt
+
+# Inactivity timeout in seconds (0 = disabled)
+inactivity_timeout = 3600
+```
+
+### Kiosk Mode Restrictions
+When kiosk mode is enabled:
+- Model selection is locked (users cannot change the model)
+- System prompt is loaded from file and cannot be modified
+- `/maxrounds` changes are blocked
+- `/listopenroutermodels` is disabled
+- Only `/start`, `/help`, `/clear`, and `/status` commands are available
+- Unrecognized commands display helpful error messages
+- Multi-user chats are still supported with separate conversation histories
+- Visual indicator (🔒) shows kiosk mode is active
+
+### Image-Capable Models in Kiosk Mode
+
+When using image-capable models (e.g., Gemini models with image generation) in kiosk mode, the bot automatically ensures responses include **both** images and explanatory text:
+
+**Automatic Enhancements:**
+1. **System Prompt Enhancement**: The system prompt is automatically enhanced with instructions to always provide both image and text
+2. **User Prompt Enhancement**: When users request images (using keywords like "draw", "diagram", "illustrate"), their prompts are enhanced to explicitly request both components
+3. **Response Validation**: If a model returns only an image without text, a fallback description is provided
+4. **Reasoning Field Fallback**: Text explanations from the `reasoning` field (used by some models like Gemini) are automatically extracted
+
+**Benefits for Educational Use:**
+- Students receive visual aids with clear explanations
+- Improves accessibility for all learning styles
+- Ensures context is never lost when images are generated
+- Supports the Socratic teaching method with visual + verbal guidance
 
 ## Installation
 
-### Requirements
 ```bash
 pip install -r requirements.txt
-```
-
-### Environment Variables
-Set the following environment variables:
-```bash
-export BOT_KEY="your-telegram-bot-token"
-export API_KEY="your-openai-api-key"
-export ANTHROPIC_API_KEY="your-anthropic-api-key"  # Optional
-export OPENROUTER_API_KEY="your-openrouter-api-key"  # Optional
-export GROQ_API_KEY="your-groq-api-key"  # Optional
-```
-
-### Running the Bot
-```bash
 python3 ai-tgbot.py
 ```
 
@@ -91,13 +122,26 @@ Run the test suite:
 ```bash
 python3 tests/test_profiles.py
 python3 tests/test_latex.py
+python3 tests/test_integration.py
+```
+
+## Chat Logging
+
+The bot supports chat logging with separate log levels for user and assistant messages. Add a `[logging]` section to your `kiosk.conf` file:
+
+```ini
+[logging]
+# Values: off, minimum (text only), extended (text + attachments)
+log_user_messages = minimum
+log_assistant_messages = extended
+log_directory = ./chat_logs
 ```
 
 ## Version History
-- **1.7.0** - Profile system and LaTeX support
+- **1.9.0** - Profile system and LaTeX support merged with kiosk mode
+- **1.8.0** - Ensure image-capable models in kiosk mode return both image and text
+- **1.7.1** - Fix missing text description when image is generated
+- **1.7.0** - Kiosk mode for locked-down dedicated instances
 - **1.6.0** - Image in and out
 - **1.5.0** - OpenRouter buttons
 - **1.4.0** - GPT-4o-mini support and becomes the default
-- **1.3.0** - OpenRouter substring matches
-- **1.2.0** - GPT-4o support and set to default, increase max tokens
-- **1.1.0** - Llama3 using Groq
