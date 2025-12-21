@@ -1,4 +1,4 @@
-version = "1.7.0"
+version = "1.7.1"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -8,6 +8,7 @@ version = "1.7.0"
 # 1.5.0 - openrouter buttons
 # 1.6.0 - image in and out
 # 1.7.0 - kiosk mode for locked-down dedicated instances
+# 1.7.1 - fix missing text description when image is generated (reasoning field fallback)
 
 import requests
 import base64
@@ -966,6 +967,13 @@ def get_reply(message, image_data_64_list, session_id):
             else:
                 # Simple string response (OpenRouter format: text in content, images in separate array)
                 response_text = message_content.strip() if message_content else ""
+            
+            # Fall back to reasoning field if content is empty but reasoning exists
+            # (e.g., Google Gemini via OpenRouter puts explanatory text in reasoning for image responses)
+            reasoning_text = message.get("reasoning")
+            if not response_text and reasoning_text and isinstance(reasoning_text, str) and reasoning_text.strip():
+                response_text = reasoning_text.strip()
+                print(f"Using reasoning field as fallback: {response_text[:100]}...")
             
             # Send any images to Telegram
             for image_data, mime_type in images_received:
