@@ -51,6 +51,32 @@ When kiosk mode is enabled:
 - Multi-user chats are still supported with separate conversation histories
 - Visual indicator (🔒) shows kiosk mode is active
 
+### Image-Capable Models in Kiosk Mode
+
+When using image-capable models (e.g., Gemini models with image generation) in kiosk mode, the bot automatically ensures responses include **both** images and explanatory text:
+
+**Automatic Enhancements:**
+1. **System Prompt Enhancement**: The system prompt is automatically enhanced with instructions to always provide both image and text
+2. **User Prompt Enhancement**: When users request images (using keywords like "draw", "diagram", "illustrate"), their prompts are enhanced to explicitly request both components
+3. **Response Validation**: If a model returns only an image without text, a fallback description is provided
+4. **Reasoning Field Fallback**: Text explanations from the `reasoning` field (used by some models like Gemini) are automatically extracted
+
+**Benefits for Educational Use:**
+- Students receive visual aids with clear explanations
+- Improves accessibility for all learning styles
+- Ensures context is never lost when images are generated
+- Supports the Socratic teaching method with visual + verbal guidance
+
+**Example Interaction:**
+```
+Student: "Draw a diagram of the water cycle"
+Bot Response: 
+  [Generated image of water cycle]
+  "This diagram shows the water cycle with four main stages: evaporation 
+   from bodies of water, condensation in clouds, precipitation as rain, 
+   and collection back into water bodies."
+```
+
 ### Example Setup for Educational Use
 
 1. Copy the example config:
@@ -149,7 +175,42 @@ log_chats = minimum
 
 ## Developer Notes
 
-### Image Generation and Reasoning Field
+### Image Generation and Multimodal Responses
+
+#### Text + Image Response Enforcement (v1.8.0+)
+
+When using image-capable models (models that can generate images) in **kiosk mode**, the bot automatically ensures that responses always include both images and explanatory text:
+
+**Implementation Details:**
+
+1. **Model Detection**: The `model_supports_image_output()` function checks if a model supports image generation by querying the OpenRouter API capabilities cache.
+
+2. **System Prompt Enhancement**: When initializing a session with an image-capable model in kiosk mode, the system prompt is automatically enhanced with explicit instructions:
+   ```
+   **IMPORTANT**: When generating images, always provide BOTH:
+   1. A generated image that directly addresses the request
+   2. A clear text explanation (1-3 sentences) describing what the image shows
+   Never generate only an image without accompanying text explanation.
+   ```
+
+3. **User Prompt Enhancement**: When users request images (detected via keywords like "draw", "diagram", "illustrate"), their prompts are automatically enhanced with:
+   ```
+   (Please provide both a visual representation AND a text explanation.)
+   ```
+
+4. **Response Parsing with Fallbacks**:
+   - Primary: Extract text from `content` field
+   - Fallback 1: Extract text from `reasoning` field (used by some models like Gemini)
+   - Fallback 2: If images exist but no text, provide placeholder: "(Image generated without text description)"
+
+5. **Image Request Keywords**: The following keywords trigger user prompt enhancement:
+   - `draw`, `sketch`, `diagram`, `illustrate`, `visualize`, `show me`
+   - `picture`, `image`, `graph`, `chart`, `plot`, `create`
+   - `generate`, `make`, `design`
+
+**Testing**: Run `python test_image_text_kiosk.py` to validate the implementation.
+
+#### Image Generation and Reasoning Field
 
 When using certain models like Google Gemini via OpenRouter for image generation, the API may return explanatory text in different fields:
 
@@ -159,6 +220,7 @@ When using certain models like Google Gemini via OpenRouter for image generation
 The bot automatically handles this by:
 1. Checking the `content` field first (primary source for text)
 2. If `content` is empty, falling back to the `reasoning` field
-3. This ensures users see both generated images and the AI's explanation/description
+3. In kiosk mode with image-capable models, providing a fallback message if both are empty
+4. This ensures users see both generated images and the AI's explanation/description
 
 This behavior is logged in debug output when it occurs. See the debug logs (if enabled) for details on response structure.
