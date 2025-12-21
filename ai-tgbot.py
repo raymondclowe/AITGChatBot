@@ -1,4 +1,4 @@
-version = "1.7.1"
+version = "1.8.0"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -9,6 +9,7 @@ version = "1.7.1"
 # 1.6.0 - image in and out
 # 1.7.0 - kiosk mode for locked-down dedicated instances
 # 1.7.1 - fix missing text description when image is generated (reasoning field fallback)
+# 1.8.0 - ensure image-capable models in kiosk mode return both image and text
 
 import requests
 import base64
@@ -141,6 +142,22 @@ KIOSK_MODEL = 'gpt-4o-mini'
 KIOSK_PROMPT_FILE = ''
 KIOSK_INACTIVITY_TIMEOUT = 0
 KIOSK_SYSTEM_PROMPT = ""
+
+# Image generation constants for kiosk mode
+# Instruction text added to system prompts for image-capable models
+IMAGE_TEXT_INSTRUCTION = (
+    "\n\n**IMPORTANT**: When generating images, always provide BOTH:\n"
+    "1. A generated image that directly addresses the request\n"
+    "2. A clear text explanation (1-3 sentences) describing what the image shows\n"
+    "Never generate only an image without accompanying text explanation."
+)
+
+# Keywords that indicate a user is requesting image generation
+IMAGE_REQUEST_KEYWORDS = [
+    'draw', 'sketch', 'diagram', 'illustrate', 'visualize', 'show me',
+    'picture', 'image', 'graph', 'chart', 'plot', 'create',
+    'generate', 'make', 'design'
+]
 
 # Chat logging configuration
 # Settings loaded from kiosk.conf file and command line
@@ -503,10 +520,17 @@ def initialize_session(chat_id):
     
     # Add system prompt for kiosk mode
     if KIOSK_MODE and KIOSK_SYSTEM_PROMPT:
+        system_prompt_text = KIOSK_SYSTEM_PROMPT
+        
+        # Enhance prompt for image-capable models to request both image and text
+        if model_supports_image_output(model):
+            system_prompt_text = system_prompt_text + IMAGE_TEXT_INSTRUCTION
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Kiosk mode: Enhanced system prompt for image-capable model {model}")
+        
         session['CONVERSATION'] = [
             {
                 "role": "system",
-                "content": [{"type": "text", "text": KIOSK_SYSTEM_PROMPT}]
+                "content": [{"type": "text", "text": system_prompt_text}]
             }
         ]
     
@@ -569,11 +593,18 @@ def update_model_version(session_id, command):
 def clear_context(chat_id):
     """Clear conversation context, preserving system prompt in kiosk mode"""
     if KIOSK_MODE and KIOSK_SYSTEM_PROMPT:
-        # Preserve the system prompt in kiosk mode
+        # Preserve the system prompt in kiosk mode (with image instruction if applicable)
+        model = session_data[chat_id]['model_version']
+        system_prompt_text = KIOSK_SYSTEM_PROMPT
+        
+        # Enhance prompt for image-capable models to request both image and text
+        if model_supports_image_output(model):
+            system_prompt_text = system_prompt_text + IMAGE_TEXT_INSTRUCTION
+        
         session_data[chat_id]['CONVERSATION'] = [
             {
                 "role": "system",
-                "content": [{"type": "text", "text": KIOSK_SYSTEM_PROMPT}]
+                "content": [{"type": "text", "text": system_prompt_text}]
             }
         ]
     else:
@@ -616,10 +647,24 @@ def get_reply(message, image_data_64_list, session_id):
             session_data[session_id]["CONVERSATION"] = conversation[-max_messages:]
 
     # Add the new user message to the conversation
+    # In kiosk mode with image-capable models, check if the user is requesting an image
+    # and enhance the prompt to ensure both image and text are returned
+    user_message_text = message
+    model = session_data[session_id]["model_version"]
+    
+    if KIOSK_MODE and model_supports_image_output(model):
+        # Keywords that suggest the user is asking for an image/diagram/visualization
+        message_lower = message.lower()
+        # Check if the message contains any image request keywords
+        if any(keyword in message_lower for keyword in IMAGE_REQUEST_KEYWORDS):
+            # Append instruction to ensure both image and text are provided
+            user_message_text = message + "\n\n(Please provide both a visual representation AND a text explanation.)"
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Kiosk mode: Enhanced user prompt for image request")
+    
     new_user_message = [
         {
             "role": "user",
-            "content": [{"type": "text", "text": message}],
+            "content": [{"type": "text", "text": user_message_text}],
             # "datetime": datetime.now(),
         }
     ]
@@ -697,6 +742,11 @@ def get_reply(message, image_data_64_list, session_id):
             "max_tokens": 4000,
             "messages": session_data[session_id]["CONVERSATION"],
         }
+        
+        # For image-capable models in kiosk mode, log that we're using an image model
+        # The system prompt has already been enhanced to request both text and images
+        if KIOSK_MODE and model_supports_image_output(model):
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Kiosk mode: Using image-capable model {model[11:]} with enhanced prompt")
 
         endpoint_url = OPENROUTER_API_URL
         log_debug("REQUEST", endpoint_url, payload)
@@ -974,6 +1024,11 @@ def get_reply(message, image_data_64_list, session_id):
             if not response_text and reasoning_text and isinstance(reasoning_text, str) and reasoning_text.strip():
                 response_text = reasoning_text.strip()
                 print(f"Using reasoning field as fallback: {response_text[:100]}...")
+            
+            # In kiosk mode with image-capable models, warn if images were generated without text
+            if KIOSK_MODE and model_supports_image_output(model) and images_received and not response_text:
+                response_text = "(Image generated without text description)"
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] WARNING: Image-capable model returned image(s) without text description")
             
             # Send any images to Telegram
             for image_data, mime_type in images_received:
@@ -1254,6 +1309,40 @@ def get_matching_models(substring):
     all_models = list_openrouter_models_as_list()
     matching_models = [model for model in all_models if substring in model]
     return matching_models
+
+
+def model_supports_image_output(model_version):
+    """
+    Check if a model supports image output (generation).
+    
+    Args:
+        model_version: Full model identifier (e.g., "openrouter:google/gemini-2.0-flash-001")
+    
+    Returns:
+        bool: True if model supports image output, False otherwise
+    """
+    # OpenRouter models
+    if model_version.startswith("openrouter:"):
+        model_id = model_version[11:]  # Strip "openrouter:" prefix
+        capabilities = get_openrouter_model_capabilities()
+        caps = capabilities.get(model_id, {})
+        return caps.get('image_output', False)
+    
+    # GPT models - check for specific image-capable models
+    # Currently, only certain experimental models support image generation
+    # This is future-proofing for when OpenAI releases image generation models
+    if model_version.startswith("gpt"):
+        return False  # No standard GPT models support image output yet
+    
+    # Claude models don't support image output
+    if model_version.startswith("claud"):
+        return False
+    
+    # Llama models don't support image output
+    if model_version.startswith("llama"):
+        return False
+    
+    return False
 
 
 def group_media_messages(result_list):
