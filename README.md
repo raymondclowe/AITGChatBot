@@ -6,7 +6,49 @@ An AI LLM powered Telegram ChatBot with switchable backends; supports OpenAI, Mi
 - Multiple AI backends: OpenAI (GPT-3.5, GPT-4, GPT-4o), Anthropic Claude, OpenRouter models, and Groq (Llama 3)
 - Image input/output support for vision and image generation models
 - Conversation history with configurable max rounds
+- **Profile System** for switching between AI personalities
+- **LaTeX Support** for rendering mathematical equations
 - **Kiosk Mode** for locked-down, dedicated use cases
+
+## Profile System
+
+Switch between different AI personalities and configurations using profile files. Perfect for creating specialized assistants for different use cases.
+
+### Profile Commands
+- `/activate <profile>` - Activate a profile
+- `/listprofiles` - Show all available profiles  
+- `/currentprofile` - Show current active profile
+- `/deactivate` - Return to default configuration
+
+### Profile Format
+Create your own `.profile` files in the `profiles/` directory:
+```
+Line 1: Model name (e.g., gpt-4o-mini, openrouter:anthropic/claude-3-opus)
+Line 2: Greeting message
+Line 3: Personality name
+Line 4+: System prompt (can span multiple lines)
+```
+
+### Included Profiles
+- **eec** - Emergency Education Chatbot for IB Math and Physics
+- **ib_tutor** - IB Math and Physics tutor using Socratic method
+- **pirate** - A fun pirate-themed assistant
+
+## LaTeX Support
+
+Automatically detects and renders mathematical equations in LaTeX format as images.
+
+**Supported Formats:**
+- Display math: `$$E = mc^2$$`
+- Code blocks:
+  ````
+  ```latex
+  \frac{d}{dx}(x^2) = 2x
+  ```
+  ````
+- LaTeX display: `\[integral equation\]`
+
+The bot will automatically detect LaTeX in AI responses, render them as PNG images using matplotlib, and send them to Telegram.
 
 ## Environment Variables
 
@@ -67,160 +109,39 @@ When using image-capable models (e.g., Gemini models with image generation) in k
 - Ensures context is never lost when images are generated
 - Supports the Socratic teaching method with visual + verbal guidance
 
-**Example Interaction:**
-```
-Student: "Draw a diagram of the water cycle"
-Bot Response: 
-  [Generated image of water cycle]
-  "This diagram shows the water cycle with four main stages: evaporation 
-   from bodies of water, condensation in clouds, precipitation as rain, 
-   and collection back into water bodies."
-```
+## Installation
 
-### Example Setup for Educational Use
-
-1. Copy the example config:
 ```bash
-cp kiosk.conf.example kiosk.conf
+pip install -r requirements.txt
+python3 ai-tgbot.py
 ```
 
-2. Edit `kiosk.conf` with your settings:
-```ini
-[kiosk]
-enabled = true
-model = openrouter:google/gemini-2.0-flash-001
-prompt_file = kiosk_prompt_example.txt
-inactivity_timeout = 3600
-```
+## Testing
 
-3. Create or edit your system prompt file (e.g., `kiosk_prompt_example.txt`)
-
-4. Run the bot:
+Run the test suite:
 ```bash
-python ai-tgbot.py
+python3 tests/test_profiles.py
+python3 tests/test_latex.py
+python3 tests/test_integration.py
 ```
 
 ## Chat Logging
 
-The bot supports chat logging with separate log levels for user and assistant messages. This provides fine-grained control over what gets logged, which is useful for privacy, auditing, and debugging purposes.
-
-### Configuration
-
-Add a `[logging]` section to your `kiosk.conf` file:
+The bot supports chat logging with separate log levels for user and assistant messages. Add a `[logging]` section to your `kiosk.conf` file:
 
 ```ini
 [logging]
-# Separate log levels for user and assistant messages
 # Values: off, minimum (text only), extended (text + attachments)
 log_user_messages = minimum
 log_assistant_messages = extended
-
-# Directory where chat logs are saved
 log_directory = ./chat_logs
 ```
 
-### Log Levels
-
-- `off` - No logging for this role
-- `minimum` - Log text messages only
-- `extended` - Log text messages and images/attachments
-
-### Use Cases
-
-**Privacy/Auditing**: Log only user messages for audit trails:
-```ini
-log_user_messages = minimum
-log_assistant_messages = off
-```
-
-**Debugging**: Log only assistant responses to troubleshoot model behavior:
-```ini
-log_user_messages = off
-log_assistant_messages = extended
-```
-
-**Full Logging**: Log everything for comprehensive records:
-```ini
-log_user_messages = extended
-log_assistant_messages = extended
-```
-
-### Backward Compatibility
-
-For backward compatibility, you can still use the legacy `log_chats` setting, which applies the same level to both user and assistant messages:
-
-```ini
-[logging]
-log_chats = minimum
-```
-
-## Commands
-
-### Standard Mode
-- `/help` - Show help message
-- `/clear` - Clear conversation context
-- `/status` - Show current chatbot status
-- `/maxrounds <n>` - Set max conversation rounds
-- `/gpt3`, `/gpt4`, `/gpt4o`, `/gpt4omini` - Switch to OpenAI models
-- `/claud3opus`, `/claud3haiku` - Switch to Anthropic Claude models
-- `/llama38b`, `/llama370b` - Switch to Groq Llama models
-- `/openrouter <model>` - Switch to an OpenRouter model
-- `/listopenroutermodels` - List available OpenRouter models
-
-### Kiosk Mode
-- `/start` - Show welcome message
-- `/help` - Show kiosk mode help
-- `/clear` - Clear conversation context
-- `/status` - Show current status (with kiosk mode indicator)
-
-## Developer Notes
-
-### Image Generation and Multimodal Responses
-
-#### Text + Image Response Enforcement (v1.8.0+)
-
-When using image-capable models (models that can generate images) in **kiosk mode**, the bot automatically ensures that responses always include both images and explanatory text:
-
-**Implementation Details:**
-
-1. **Model Detection**: The `model_supports_image_output()` function checks if a model supports image generation by querying the OpenRouter API capabilities cache.
-
-2. **System Prompt Enhancement**: When initializing a session with an image-capable model in kiosk mode, the system prompt is automatically enhanced with explicit instructions:
-   ```
-   **IMPORTANT**: When generating images, always provide BOTH:
-   1. A generated image that directly addresses the request
-   2. A clear text explanation (1-3 sentences) describing what the image shows
-   Never generate only an image without accompanying text explanation.
-   ```
-
-3. **User Prompt Enhancement**: When users request images (detected via keywords like "draw", "diagram", "illustrate"), their prompts are automatically enhanced with:
-   ```
-   (Please provide both a visual representation AND a text explanation.)
-   ```
-
-4. **Response Parsing with Fallbacks**:
-   - Primary: Extract text from `content` field
-   - Fallback 1: Extract text from `reasoning` field (used by some models like Gemini)
-   - Fallback 2: If images exist but no text, provide placeholder: "(Image generated without text description)"
-
-5. **Image Request Keywords**: The following keywords trigger user prompt enhancement:
-   - `draw`, `sketch`, `diagram`, `illustrate`, `visualize`, `show me`
-   - `picture`, `image`, `graph`, `chart`, `plot`, `create`
-   - `generate`, `make`, `design`
-
-**Testing**: Run `python test_image_text_kiosk.py` to validate the implementation.
-
-#### Image Generation and Reasoning Field
-
-When using certain models like Google Gemini via OpenRouter for image generation, the API may return explanatory text in different fields:
-
-- **Standard behavior**: Text content is in the `content` field
-- **Image generation (specifically Google Gemini via OpenRouter)**: When an image is generated, the `content` field may be empty and the explanatory/descriptive text is instead placed in a `reasoning` field
-
-The bot automatically handles this by:
-1. Checking the `content` field first (primary source for text)
-2. If `content` is empty, falling back to the `reasoning` field
-3. In kiosk mode with image-capable models, providing a fallback message if both are empty
-4. This ensures users see both generated images and the AI's explanation/description
-
-This behavior is logged in debug output when it occurs. See the debug logs (if enabled) for details on response structure.
+## Version History
+- **1.9.0** - Profile system and LaTeX support merged with kiosk mode
+- **1.8.0** - Ensure image-capable models in kiosk mode return both image and text
+- **1.7.1** - Fix missing text description when image is generated
+- **1.7.0** - Kiosk mode for locked-down dedicated instances
+- **1.6.0** - Image in and out
+- **1.5.0** - OpenRouter buttons
+- **1.4.0** - GPT-4o-mini support and becomes the default
