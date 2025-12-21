@@ -74,15 +74,15 @@ class PluginManager:
         
         try:
             # Load the module
-            spec = importlib.util.spec_from_file_location("kiosk_custom", plugin_file)
+            spec = importlib.util.spec_from_file_location("kiosk_custom_plugin", plugin_file)
             if spec is None or spec.loader is None:
                 self.logger.error(f"Failed to load plugin spec from {plugin_file}")
                 return False
             
             module = importlib.util.module_from_spec(spec)
             
-            # Add to sys.modules to allow plugin to import from same directory
-            sys.modules['kiosk_custom'] = module
+            # Add to sys.modules with unique name to avoid conflicts with future multi-plugin support
+            sys.modules['kiosk_custom_plugin'] = module
             
             # Execute the module
             spec.loader.exec_module(module)

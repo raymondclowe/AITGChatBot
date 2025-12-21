@@ -1244,11 +1244,12 @@ def get_reply(message, image_data_64_list, session_id):
             images_b64 = [base64.b64encode(img_data).decode('utf-8') for img_data, _ in images_received]
             images_b64 = plugin_manager.post_assistant_images(images_b64, response_text, session_id)
             # If plugin added new images, send them to Telegram
-            if len(images_b64) > len(images_received):
+            if images_b64 and len(images_b64) > len(images_received):
                 for i in range(len(images_received), len(images_b64)):
-                    img_data = base64.b64decode(images_b64[i])
-                    mime_type = 'image/png'  # Default for plugin-generated images
-                    send_image_to_telegram(session_id, img_data, mime_type)
+                    if i < len(images_b64):  # Safety check
+                        img_data = base64.b64decode(images_b64[i])
+                        mime_type = 'image/png'  # Default for plugin-generated images
+                        send_image_to_telegram(session_id, img_data, mime_type)
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_assistant_images: {e}")
     

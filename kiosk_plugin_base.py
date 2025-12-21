@@ -371,26 +371,37 @@ def with_timeout(timeout_seconds: float):
     
     Args:
         timeout_seconds: Maximum execution time in seconds
+    
+    Note:
+        Uses signal-based timeout on Unix-like systems. On Windows or in 
+        multi-threaded contexts, timeout may not work reliably. Consider
+        using threading.Timer or asyncio for production Windows deployments.
     """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            import signal
-            
-            def timeout_handler(signum, frame):
-                raise TimeoutError(f"Plugin hook {func.__name__} exceeded timeout of {timeout_seconds}s")
-            
-            # Set the alarm
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(int(timeout_seconds))
-            
+            # Check if we can use signal-based timeout
             try:
-                result = func(*args, **kwargs)
-                return result
-            finally:
-                # Cancel the alarm and restore old handler
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, old_handler)
+                import signal
+                
+                def timeout_handler(signum, frame):
+                    raise TimeoutError(f"Plugin hook {func.__name__} exceeded timeout of {timeout_seconds}s")
+                
+                # Set the alarm
+                old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(int(timeout_seconds))
+                
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                finally:
+                    # Cancel the alarm and restore old handler
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
+            except (AttributeError, ValueError):
+                # SIGALRM not available (e.g., Windows) - run without timeout
+                # In production, consider using threading.Timer as fallback
+                return func(*args, **kwargs)
         
         return wrapper
     return decorator
