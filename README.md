@@ -151,10 +151,10 @@ log_chats = minimum
 
 ### Image Generation and Reasoning Field
 
-When using models like Google Gemini via OpenRouter for image generation, the API may return explanatory text in different fields:
+When using certain models like Google Gemini via OpenRouter for image generation, the API may return explanatory text in different fields:
 
 - **Standard behavior**: Text content is in the `content` field
-- **Image generation (Gemini/OpenRouter)**: When an image is generated, the `content` field may be empty and the explanatory/descriptive text is instead placed in a `reasoning` field
+- **Image generation (specifically Google Gemini via OpenRouter)**: When an image is generated, the `content` field may be empty and the explanatory/descriptive text is instead placed in a `reasoning` field
 
 The bot automatically handles this by:
 1. Checking the `content` field first (primary source for text)
