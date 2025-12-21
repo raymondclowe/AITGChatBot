@@ -972,11 +972,9 @@ def get_reply(message, image_data_64_list, session_id):
             # (e.g., Google Gemini via OpenRouter puts explanatory text in reasoning for image responses)
             if not response_text and message.get("reasoning"):
                 reasoning_text = message["reasoning"]
-                if reasoning_text and isinstance(reasoning_text, str):
-                    reasoning_text = reasoning_text.strip()
-                    if reasoning_text:  # Check that stripped text is non-empty
-                        response_text = reasoning_text
-                        print(f"Using reasoning field as fallback: {response_text[:100]}...")
+                if reasoning_text and isinstance(reasoning_text, str) and reasoning_text.strip():
+                    response_text = reasoning_text.strip()
+                    print(f"Using reasoning field as fallback: {response_text[:100]}...")
             
             # Send any images to Telegram
             for image_data, mime_type in images_received:
