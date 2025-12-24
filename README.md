@@ -263,6 +263,55 @@ All hooks receive a `context` dict with:
 - Called: After complete user+assistant exchange
 - Use for: Logging, analytics, cleanup, state updates
 
+### Custom Slash Commands
+
+Plugins can register custom slash commands that execute arbitrary code. Commands work in both kiosk and regular modes.
+
+**`get_commands() -> Dict[str, Dict[str, Any]]`**
+- Returns: Dictionary mapping command names to command info
+- Called: Once during plugin initialization
+
+```python
+def get_commands(self):
+    return {
+        'generate-worksheets': {
+            'description': 'Generate practice worksheets',
+            'handler': self.handle_generate_worksheets,
+            'available_in_kiosk': True
+        }
+    }
+
+def handle_generate_worksheets(self, chat_id, context):
+    # Send initial status message
+    self.send_message(chat_id, "📝 Generating... Please wait.", context)
+    
+    # Use AI to generate content
+    ai_helper = context['ai_helper']
+    worksheet = ai_helper.quick_call(
+        system="Create educational worksheets",
+        user="Generate 5 math problems"
+    )
+    
+    # Create HTML document
+    html_content = f"<html><body>{worksheet}</body></html>"
+    html_bytes = html_content.encode('utf-8')
+    
+    # Send as downloadable file
+    self.send_document(
+        chat_id, 
+        html_bytes,
+        'worksheet.html',
+        '✅ Here is your worksheet!',
+        context
+    )
+```
+
+**Helper methods for commands:**
+- `send_message(chat_id, text, context)` - Send text messages
+- `send_document(chat_id, data, filename, caption, context)` - Send files/documents
+
+Commands automatically appear in `/help` and are available immediately after plugin loads.
+
 ### AI Helper API
 
 The `ai_helper` object provides utilities for plugin development:
@@ -322,6 +371,11 @@ See `kiosk-custom.py.example` for a full-featured plugin demonstrating:
 3. **Syntax Highlighting** - Render code blocks as highlighted images
 4. **Profanity Filter** - Basic word filtering on user input
 5. **Analytics** - Track message counts and usage in metadata
+6. **Custom Commands** - `/generate-worksheets` and `/summary` commands that:
+   - Send multiple progress messages
+   - Use AI to analyze conversation history
+   - Generate and send HTML documents
+   - Work in both kiosk and regular modes
 
 All features gracefully degrade if dependencies (matplotlib, pygments) are missing.
 

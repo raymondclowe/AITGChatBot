@@ -1707,8 +1707,17 @@ def long_polling():
                         reply_text += "/start - show welcome message\n"
                         reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the conversation context\n"
-                        reply_text += "/status - view current chatbot status\n\n"
-                        reply_text += "All other settings (model, prompt, etc.) are locked by the administrator.\n"
+                        reply_text += "/status - view current chatbot status\n"
+                        
+                        # Add plugin commands if available
+                        if plugin_manager:
+                            plugin_commands = plugin_manager.get_registered_commands(kiosk_mode=True)
+                            if plugin_commands:
+                                reply_text += "\nPlugin commands:\n"
+                                for cmd_name, cmd_desc in plugin_commands.items():
+                                    reply_text += f"/{cmd_name} - {cmd_desc}\n"
+                        
+                        reply_text += "\nAll other settings (model, prompt, etc.) are locked by the administrator.\n"
                         reply_text += "Simply type your message or send an image to chat!"
                     else:
                         reply_text = "Commands:\n"
@@ -1868,14 +1877,40 @@ def long_polling():
     
                 # Handle unrecognized commands (starts with / but doesn't match any known command)
                 elif message_text.startswith("/"):
-                    # Check if it's a recognized command that we haven't handled yet
-                    # This catches any command starting with / that hasn't been processed above
-                    if KIOSK_MODE:
-                        # In kiosk mode, provide specific guidance about available commands
-                        send_message(chat_id, "❌ Unrecognized command. In kiosk mode, only /start, /help, /clear, and /status are available. Type /help for more information.")
-                    else:
-                        # In normal mode, suggest help command
-                        send_message(chat_id, "❌ Unrecognized command. Type /help to see available commands.")
+                    # First, check if this is a plugin command
+                    plugin_handled = False
+                    if plugin_manager:
+                        try:
+                            result = plugin_manager.handle_command(
+                                message_text,
+                                chat_id,
+                                KIOSK_MODE,
+                                send_message_fn=send_message,
+                                send_document_fn=send_document_to_telegram
+                            )
+                            if result is True:
+                                plugin_handled = True
+                                continue
+                            elif result is None:
+                                # Error occurred
+                                send_message(chat_id, "❌ Error executing plugin command. Please try again.")
+                                continue
+                        except Exception as e:
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error handling plugin command: {e}")
+                    
+                    # If not handled by plugin, show unrecognized command message
+                    if not plugin_handled:
+                        if KIOSK_MODE:
+                            # In kiosk mode, check if there are plugin commands to mention
+                            plugin_commands = plugin_manager.get_registered_commands(kiosk_mode=True) if plugin_manager else {}
+                            if plugin_commands:
+                                cmd_list = ", ".join([f"/{cmd}" for cmd in plugin_commands.keys()])
+                                send_message(chat_id, f"❌ Unrecognized command. Available: /start, /help, /clear, /status, {cmd_list}. Type /help for more information.")
+                            else:
+                                send_message(chat_id, "❌ Unrecognized command. In kiosk mode, only /start, /help, /clear, and /status are available. Type /help for more information.")
+                        else:
+                            # In normal mode, suggest help command
+                            send_message(chat_id, "❌ Unrecognized command. Type /help to see available commands.")
                     continue
     
     
@@ -2123,6 +2158,57 @@ def send_image_to_telegram(chat_id, image_data, mime_type):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send image after {max_retries} attempts")
     try:
         send_message(chat_id, f"⚠️ {len(image_data)} bytes of image data ({mime_type}) were received but couldn't be displayed due to network issues.")
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send fallback message: {e}")
+        pass  # Even the fallback failed, but don't crash
+
+
+def send_document_to_telegram(chat_id, document_data, filename, caption=""):
+    """Send a document/file to Telegram"""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Prepare the document data
+            files = {
+                'document': (filename, document_data)
+            }
+            data = {
+                'chat_id': chat_id,
+            }
+            if caption:
+                data['caption'] = caption
+            
+            # Send the document
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_KEY}/sendDocument",
+                files=files,
+                data=data,
+                timeout=60  # Longer timeout for file uploads
+            )
+            
+            if not response.ok:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error sending document (attempt {attempt + 1}/{max_retries}): {response.reason}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+            else:
+                return  # Success
+                    
+        except NETWORK_EXCEPTIONS as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Network error sending document (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Exception sending document (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+    
+    # All retries failed - send text message as fallback
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send document after {max_retries} attempts")
+    try:
+        send_message(chat_id, f"⚠️ Failed to send document '{filename}' due to network issues.")
     except Exception as e:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send fallback message: {e}")
         pass  # Even the fallback failed, but don't crash

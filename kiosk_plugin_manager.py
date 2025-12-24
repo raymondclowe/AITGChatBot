@@ -56,6 +56,9 @@ class PluginManager:
         # Plugin metadata storage (per-session)
         self.plugin_metadata: Dict[str, Dict[str, Any]] = {}
         
+        # Plugin command registration
+        self.registered_commands: Dict[str, Dict[str, Any]] = {}
+        
         if self.config.enabled:
             self.load_plugin()
     
@@ -121,12 +124,116 @@ class PluginManager:
             
             self.logger.info(f"Successfully loaded plugin from {plugin_file}")
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔌 Plugin loaded: {plugin_class.__name__}")
+            
+            # Register commands from the plugin
+            self._register_plugin_commands()
+            
             return True
             
         except Exception as e:
             self.logger.error(f"Error loading plugin from {plugin_file}: {e}", exc_info=True)
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️  Failed to load plugin: {e}")
             return False
+    
+    def _register_plugin_commands(self) -> None:
+        """Register commands provided by the plugin."""
+        if self.plugin is None:
+            return
+        
+        try:
+            commands = self.plugin.get_commands()
+            if commands:
+                self.registered_commands = commands
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔌 Registered {len(commands)} plugin command(s): {', '.join(['/' + cmd for cmd in commands.keys()])}")
+                for cmd_name, cmd_info in commands.items():
+                    self.logger.info(f"Registered command: /{cmd_name} - {cmd_info.get('description', 'No description')}")
+        except Exception as e:
+            self.logger.error(f"Error registering plugin commands: {e}", exc_info=True)
+    
+    def handle_command(self, command: str, chat_id: str, kiosk_mode: bool, **kwargs) -> Optional[bool]:
+        """
+        Handle a plugin command.
+        
+        Args:
+            command: The command string (with or without leading /)
+            chat_id: The chat/session ID
+            kiosk_mode: Whether kiosk mode is active
+            **kwargs: Additional context (e.g., send_message_fn, send_document_fn)
+        
+        Returns:
+            True if command was handled, False if not recognized, None if error
+        """
+        if self.plugin is None or not self.health_monitor.is_healthy():
+            return False
+        
+        # Normalize command (remove leading / if present)
+        cmd_name = command.lstrip('/')
+        
+        # Check if this command is registered
+        if cmd_name not in self.registered_commands:
+            return False
+        
+        cmd_info = self.registered_commands[cmd_name]
+        
+        # Check if command is available in current mode
+        if kiosk_mode and not cmd_info.get('available_in_kiosk', True):
+            self.logger.warning(f"Command /{cmd_name} not available in kiosk mode")
+            return False
+        
+        # Build context with command-specific additions
+        context = self.build_context(chat_id, **kwargs)
+        
+        try:
+            # Get the handler
+            handler = cmd_info.get('handler')
+            if handler is None:
+                self.logger.error(f"No handler found for command /{cmd_name}")
+                return None
+            
+            # Execute the command handler with timeout
+            if self.config.timeout > 0:
+                @with_timeout(self.config.timeout)
+                def timed_handler():
+                    return handler(chat_id, context)
+                
+                result = timed_handler()
+            else:
+                result = handler(chat_id, context)
+            
+            # Record success
+            self.health_monitor.record_success(f'command_{cmd_name}')
+            
+            if self.config.debug:
+                self.logger.debug(f"Command /{cmd_name} executed successfully")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error executing command /{cmd_name}: {e}", exc_info=True)
+            should_disable = self.health_monitor.record_failure(f'command_{cmd_name}')
+            if should_disable:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️  Plugin disabled due to repeated failures")
+            return None
+    
+    def get_registered_commands(self, kiosk_mode: bool = False) -> Dict[str, str]:
+        """
+        Get list of registered commands available in the current mode.
+        
+        Args:
+            kiosk_mode: Whether to filter for kiosk mode availability
+        
+        Returns:
+            Dictionary mapping command names to descriptions
+        """
+        if not self.registered_commands:
+            return {}
+        
+        result = {}
+        for cmd_name, cmd_info in self.registered_commands.items():
+            if not kiosk_mode or cmd_info.get('available_in_kiosk', True):
+                result[cmd_name] = cmd_info.get('description', 'No description')
+        
+        return result
     
     def build_context(self, chat_id: str, **kwargs) -> Dict[str, Any]:
         """

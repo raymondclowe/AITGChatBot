@@ -379,3 +379,197 @@ class AdvancedKioskPlugin(KioskPlugin):
         except Exception as e:
             self.log(f"Error in _render_code: {e}")
             return None
+    
+    def get_commands(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Register custom commands for this plugin.
+        
+        Returns:
+            Dictionary of command name -> command info
+        """
+        return {
+            'generate-worksheets': {
+                'description': 'Generate practice worksheets based on conversation',
+                'handler': self.handle_generate_worksheets,
+                'available_in_kiosk': True
+            },
+            'summary': {
+                'description': 'Get a summary of the current conversation',
+                'handler': self.handle_summary,
+                'available_in_kiosk': True
+            }
+        }
+    
+    def handle_generate_worksheets(self, chat_id: str, context: Dict[str, Any]) -> None:
+        """
+        Command handler: Generate practice worksheets.
+        
+        This is an example showing how plugins can:
+        - Send multiple messages
+        - Use AI to analyze conversation
+        - Generate and send documents
+        
+        Args:
+            chat_id: The chat ID
+            context: Rich context dictionary
+        """
+        # Send initial message
+        self.send_message(chat_id, "📝 Generating worksheets... Please wait.", context)
+        
+        try:
+            # Get conversation history
+            history = context.get('history', [])
+            
+            if not history or len(history) < 2:
+                self.send_message(chat_id, "❌ Not enough conversation history to generate worksheets. Please chat more first!", context)
+                return
+            
+            # Use AI to analyze conversation and generate worksheet
+            ai_helper = context.get('ai_helper')
+            if ai_helper:
+                # Build prompt for worksheet generation
+                conversation_text = self._extract_conversation_text(history)
+                
+                prompt = f"""Based on this conversation about math/homework:
+
+{conversation_text}
+
+Generate 5 practice problems similar to what was discussed. Format as:
+Problem 1: [question]
+Problem 2: [question]
+...
+
+Make them educational and appropriate for the student's level."""
+                
+                self.log("Calling AI to generate worksheet...")
+                worksheet_content = ai_helper.quick_call(
+                    system="You are a helpful educational assistant that creates practice problems.",
+                    user=prompt,
+                    model="gpt-4o-mini"
+                )
+                
+                if worksheet_content:
+                    # Create HTML document
+                    html_content = self._create_worksheet_html(worksheet_content)
+                    
+                    # Send as document
+                    html_bytes = html_content.encode('utf-8')
+                    self.send_document(
+                        chat_id,
+                        html_bytes,
+                        'practice_worksheet.html',
+                        '✅ Here is your practice worksheet! Save and open in a browser to print.',
+                        context
+                    )
+                    self.log(f"Successfully generated worksheet for chat {chat_id}")
+                else:
+                    self.send_message(chat_id, "❌ Failed to generate worksheet content. Please try again.", context)
+            else:
+                self.send_message(chat_id, "❌ AI helper not available.", context)
+                
+        except Exception as e:
+            self.log(f"Error generating worksheets: {e}")
+            self.send_message(chat_id, f"❌ Error generating worksheets: {str(e)}", context)
+    
+    def handle_summary(self, chat_id: str, context: Dict[str, Any]) -> None:
+        """
+        Command handler: Generate conversation summary.
+        
+        Args:
+            chat_id: The chat ID
+            context: Rich context dictionary
+        """
+        self.send_message(chat_id, "📊 Generating summary... Please wait.", context)
+        
+        try:
+            history = context.get('history', [])
+            
+            if not history or len(history) < 2:
+                self.send_message(chat_id, "❌ Not enough conversation history to summarize.", context)
+                return
+            
+            # Extract conversation
+            conversation_text = self._extract_conversation_text(history)
+            
+            # Get AI summary
+            ai_helper = context.get('ai_helper')
+            if ai_helper:
+                summary = ai_helper.quick_call(
+                    system="You are a helpful assistant that creates brief, clear summaries.",
+                    user=f"Summarize this conversation in 3-5 bullet points:\n\n{conversation_text}",
+                    model="gpt-4o-mini"
+                )
+                
+                if summary:
+                    self.send_message(chat_id, f"📋 **Conversation Summary:**\n\n{summary}", context)
+                else:
+                    self.send_message(chat_id, "❌ Failed to generate summary.", context)
+            else:
+                self.send_message(chat_id, "❌ AI helper not available.", context)
+                
+        except Exception as e:
+            self.log(f"Error generating summary: {e}")
+            self.send_message(chat_id, f"❌ Error: {str(e)}", context)
+    
+    def _extract_conversation_text(self, history: List[Dict[str, Any]], max_messages: int = 20) -> str:
+        """Extract text from conversation history."""
+        texts = []
+        for msg in history[-max_messages:]:
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', [])
+            
+            # Extract text from content
+            text_parts = []
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        text_parts.append(item.get('text', ''))
+            elif isinstance(content, str):
+                text_parts.append(content)
+            
+            if text_parts:
+                texts.append(f"{role}: {' '.join(text_parts)}")
+        
+        return '\n'.join(texts)
+    
+    def _create_worksheet_html(self, content: str) -> str:
+        """Create an HTML document for the worksheet."""
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Practice Worksheet</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }}
+        h1 {{ color: #333; }}
+        .problem {{ margin: 20px 0; padding: 15px; background: #f5f5f5; border-left: 4px solid #4CAF50; }}
+        .footer {{ margin-top: 40px; color: #666; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <h1>📝 Practice Worksheet</h1>
+    <p>Generated by AI Tutor</p>
+    <hr>
+    <div class="problems">
+        {self._format_problems_html(content)}
+    </div>
+    <div class="footer">
+        <p>Generated on: {self._get_timestamp()}</p>
+        <p>Print this page and work through each problem. Check your answers with your tutor!</p>
+    </div>
+</body>
+</html>"""
+        return html
+    
+    def _format_problems_html(self, content: str) -> str:
+        """Format problem text as HTML divs."""
+        problems = content.split('\n')
+        html_parts = []
+        for problem in problems:
+            if problem.strip():
+                html_parts.append(f'<div class="problem">{problem}</div>')
+        return '\n'.join(html_parts)
+    
+    def _get_timestamp(self) -> str:
+        """Get current timestamp."""
+        from datetime import datetime
+        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')

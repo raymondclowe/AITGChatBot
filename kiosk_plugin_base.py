@@ -363,6 +363,64 @@ class KioskPlugin:
             context: Rich context dictionary
         """
         pass
+    
+    def get_commands(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Register custom slash commands that this plugin provides.
+        
+        Returns:
+            Dictionary mapping command names (without /) to command info:
+            {
+                'command_name': {
+                    'description': 'Brief description',
+                    'handler': method_reference,
+                    'available_in_kiosk': True/False
+                }
+            }
+        
+        Example:
+            {
+                'generate-worksheets': {
+                    'description': 'Generate practice worksheets',
+                    'handler': self.handle_generate_worksheets,
+                    'available_in_kiosk': True
+                }
+            }
+        """
+        return {}
+    
+    def send_message(self, chat_id: str, text: str, context: Dict[str, Any]) -> None:
+        """
+        Send a message to the user. Use this in command handlers to send responses.
+        
+        Args:
+            chat_id: The chat ID to send to
+            text: The message text to send
+            context: Rich context dictionary (contains send_message_fn)
+        """
+        send_fn = context.get('send_message_fn')
+        if send_fn:
+            send_fn(chat_id, text)
+        else:
+            self.logger.warning("send_message_fn not available in context")
+    
+    def send_document(self, chat_id: str, document_data: bytes, filename: str, 
+                     caption: str, context: Dict[str, Any]) -> None:
+        """
+        Send a document/file to the user. Use this in command handlers.
+        
+        Args:
+            chat_id: The chat ID to send to
+            document_data: Binary data of the document
+            filename: Name for the file
+            caption: Caption for the document
+            context: Rich context dictionary (contains send_document_fn)
+        """
+        send_fn = context.get('send_document_fn')
+        if send_fn:
+            send_fn(chat_id, document_data, filename, caption)
+        else:
+            self.logger.warning("send_document_fn not available in context")
 
 
 def with_timeout(timeout_seconds: float):
