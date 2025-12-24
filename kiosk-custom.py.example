@@ -6,6 +6,7 @@ This example demonstrates the full capabilities of the kiosk plugin system:
 - LaTeX formula detection and rendering to images
 - Code block syntax highlighting as images
 - Simple profanity filter
+- Custom slash commands
 
 To use this plugin:
 1. Copy this file to kiosk-custom.py
@@ -19,6 +20,7 @@ import re
 import base64
 from typing import List, Dict, Any
 from io import BytesIO
+from datetime import datetime
 
 from kiosk_plugin_base import KioskPlugin
 
@@ -571,5 +573,4 @@ Make them educational and appropriate for the student's level."""
     
     def _get_timestamp(self) -> str:
         """Get current timestamp."""
-        from datetime import datetime
         return datetime.now().strftime('%Y-%m-%d %H:%M:%S')

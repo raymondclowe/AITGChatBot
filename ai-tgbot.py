@@ -2165,6 +2165,20 @@ def send_image_to_telegram(chat_id, image_data, mime_type):
 
 def send_document_to_telegram(chat_id, document_data, filename, caption=""):
     """Send a document/file to Telegram"""
+    # Validate file size (max 50MB for Telegram)
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+    if len(document_data) > MAX_FILE_SIZE:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Document too large: {len(document_data)} bytes")
+        try:
+            send_message(chat_id, f"❌ File is too large to send ({len(document_data)} bytes). Maximum is 50MB.")
+        except:
+            pass
+        return
+    
+    # Sanitize filename to prevent path traversal
+    import os
+    filename = os.path.basename(filename)
+    
     max_retries = 3
     for attempt in range(max_retries):
         try:
