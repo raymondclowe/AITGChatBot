@@ -1221,10 +1221,9 @@ def get_reply(message, image_data_64_list, session_id):
         # If plugin added new images, send them to Telegram
         if images_b64 and len(images_b64) > len(images_received):
             for i in range(len(images_received), len(images_b64)):
-                if i < len(images_b64):  # Safety check
-                    img_data = base64.b64decode(images_b64[i])
-                    mime_type = 'image/png'  # Default for plugin-generated images
-                    send_image_to_telegram(session_id, img_data, mime_type)
+                img_data = base64.b64decode(images_b64[i])
+                mime_type = 'image/png'  # Default for plugin-generated images
+                send_image_to_telegram(session_id, img_data, mime_type)
     
     # Log the assistant response (text first, then images separately)
     log_chat_message(session_id, 'assistant', response_text, None)
