@@ -602,10 +602,7 @@ def initialize_session(chat_id):
     
     # Call plugin hook for session start
     if plugin_manager:
-        try:
-            plugin_manager.on_session_start(chat_id)
-        except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin on_session_start: {e}")
+        plugin_manager.on_session_start(chat_id)
     
     return session
 
@@ -724,10 +721,7 @@ def get_reply(message, image_data_64_list, session_id):
     
     # Plugin hook: pre_user_text
     if plugin_manager and KIOSK_MODE:
-        try:
-            user_message_text = plugin_manager.pre_user_text(user_message_text, session_id)
-        except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin pre_user_text: {e}")
+        user_message_text = plugin_manager.pre_user_text(user_message_text, session_id)
     
     if KIOSK_MODE and model_supports_image_output(model):
         # Keywords that suggest the user is asking for an image/diagram/visualization
@@ -740,10 +734,7 @@ def get_reply(message, image_data_64_list, session_id):
     
     # Plugin hook: post_user_text
     if plugin_manager and KIOSK_MODE:
-        try:
-            user_message_text = plugin_manager.post_user_text(user_message_text, session_id)
-        except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_user_text: {e}")
+        user_message_text = plugin_manager.post_user_text(user_message_text, session_id)
     
     new_user_message = [
         {
@@ -762,10 +753,7 @@ def get_reply(message, image_data_64_list, session_id):
     
     # Plugin hook: pre_user_images
     if plugin_manager and KIOSK_MODE and image_data_64_list:
-        try:
-            image_data_64_list = plugin_manager.pre_user_images(image_data_64_list, user_message_text, session_id)
-        except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin pre_user_images: {e}")
+        image_data_64_list = plugin_manager.pre_user_images(image_data_64_list, user_message_text, session_id)
     
     # Add all images to the user message
     user_image_data_list = []
@@ -784,25 +772,22 @@ def get_reply(message, image_data_64_list, session_id):
     
     # Plugin hook: post_user_images
     if plugin_manager and KIOSK_MODE and image_data_64_list:
-        try:
-            # Extract just the base64 strings for the hook
-            b64_list = [img_data_64 for img_data_64 in image_data_64_list]
-            b64_list = plugin_manager.post_user_images(b64_list, user_message_text, session_id)
-            # Update if changed
-            if b64_list != image_data_64_list:
-                image_data_64_list = b64_list
-                # Need to rebuild the message content with new images
-                new_user_message[0]["content"] = [{"type": "text", "text": user_message_text}]
-                user_image_data_list = []
-                for idx, image_data_64 in enumerate(image_data_64_list):
-                    image_content_item = {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_data_64}"},
-                    }
-                    new_user_message[0]["content"].append(image_content_item)
-                    user_image_data_list.append(base64.b64decode(image_data_64))
-        except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_user_images: {e}")
+        # Extract just the base64 strings for the hook
+        b64_list = [img_data_64 for img_data_64 in image_data_64_list]
+        b64_list = plugin_manager.post_user_images(b64_list, user_message_text, session_id)
+        # Update if changed
+        if b64_list != image_data_64_list:
+            image_data_64_list = b64_list
+            # Need to rebuild the message content with new images
+            new_user_message[0]["content"] = [{"type": "text", "text": user_message_text}]
+            user_image_data_list = []
+            for idx, image_data_64 in enumerate(image_data_64_list):
+                image_content_item = {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_data_64}"},
+                }
+                new_user_message[0]["content"].append(image_content_item)
+                user_image_data_list.append(base64.b64decode(image_data_64))
     
     # Log the user message (text first, then images separately in extended mode)
     log_chat_message(session_id, 'user', message, None)
@@ -1145,28 +1130,22 @@ def get_reply(message, image_data_64_list, session_id):
             
             # Plugin hook: pre_assistant_text
             if plugin_manager and KIOSK_MODE and response_text:
-                try:
-                    response_text = plugin_manager.pre_assistant_text(response_text, session_id)
-                except Exception as e:
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin pre_assistant_text: {e}")
+                response_text = plugin_manager.pre_assistant_text(response_text, session_id)
             
             # Plugin hook: pre_assistant_images
             if plugin_manager and KIOSK_MODE and images_received:
-                try:
-                    # Convert images to base64 list for hook
-                    images_b64 = [base64.b64encode(img_data).decode('utf-8') for img_data, _ in images_received]
-                    images_b64 = plugin_manager.pre_assistant_images(images_b64, response_text, session_id)
-                    # Convert back to binary format with mime types
-                    if images_b64:
-                        new_images_received = []
-                        for i, b64_img in enumerate(images_b64):
-                            img_data = base64.b64decode(b64_img)
-                            # Preserve original mime type if available
-                            mime_type = images_received[i][1] if i < len(images_received) else 'image/jpeg'
-                            new_images_received.append((img_data, mime_type))
-                        images_received = new_images_received
-                except Exception as e:
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin pre_assistant_images: {e}")
+                # Convert images to base64 list for hook
+                images_b64 = [base64.b64encode(img_data).decode('utf-8') for img_data, _ in images_received]
+                images_b64 = plugin_manager.pre_assistant_images(images_b64, response_text, session_id)
+                # Convert back to binary format with mime types
+                if images_b64:
+                    new_images_received = []
+                    for i, b64_img in enumerate(images_b64):
+                        img_data = base64.b64decode(b64_img)
+                        # Preserve original mime type if available
+                        mime_type = images_received[i][1] if i < len(images_received) else 'image/jpeg'
+                        new_images_received.append((img_data, mime_type))
+                    images_received = new_images_received
             
             # Send any images to Telegram
             for image_data, mime_type in images_received:
@@ -1232,26 +1211,20 @@ def get_reply(message, image_data_64_list, session_id):
     
     # Plugin hook: post_assistant_text
     if plugin_manager and KIOSK_MODE and response_text:
-        try:
-            response_text = plugin_manager.post_assistant_text(response_text, session_id)
-        except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_assistant_text: {e}")
+        response_text = plugin_manager.post_assistant_text(response_text, session_id)
     
     # Plugin hook: post_assistant_images (before sending to user)
     if plugin_manager and KIOSK_MODE and images_received:
-        try:
-            # Convert images to base64 list for hook
-            images_b64 = [base64.b64encode(img_data).decode('utf-8') for img_data, _ in images_received]
-            images_b64 = plugin_manager.post_assistant_images(images_b64, response_text, session_id)
-            # If plugin added new images, send them to Telegram
-            if images_b64 and len(images_b64) > len(images_received):
-                for i in range(len(images_received), len(images_b64)):
-                    if i < len(images_b64):  # Safety check
-                        img_data = base64.b64decode(images_b64[i])
-                        mime_type = 'image/png'  # Default for plugin-generated images
-                        send_image_to_telegram(session_id, img_data, mime_type)
-        except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin post_assistant_images: {e}")
+        # Convert images to base64 list for hook
+        images_b64 = [base64.b64encode(img_data).decode('utf-8') for img_data, _ in images_received]
+        images_b64 = plugin_manager.post_assistant_images(images_b64, response_text, session_id)
+        # If plugin added new images, send them to Telegram
+        if images_b64 and len(images_b64) > len(images_received):
+            for i in range(len(images_received), len(images_b64)):
+                if i < len(images_b64):  # Safety check
+                    img_data = base64.b64decode(images_b64[i])
+                    mime_type = 'image/png'  # Default for plugin-generated images
+                    send_image_to_telegram(session_id, img_data, mime_type)
     
     # Log the assistant response (text first, then images separately)
     log_chat_message(session_id, 'assistant', response_text, None)
@@ -2011,10 +1984,7 @@ def long_polling():
                 
                 # Plugin hook: on_message_complete (after full exchange)
                 if plugin_manager and KIOSK_MODE:
-                    try:
-                        plugin_manager.on_message_complete(chat_id)
-                    except Exception as e:
-                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error in plugin on_message_complete: {e}")
+                    plugin_manager.on_message_complete(chat_id)
     
             except Exception as e:
                 print(f"Error getting reply  on line {e.__traceback__.tb_lineno}: {e}")
