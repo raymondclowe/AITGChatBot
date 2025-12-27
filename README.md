@@ -7,6 +7,7 @@ An AI LLM powered Telegram ChatBot with switchable backends; supports OpenAI, Mi
 - Image input/output support for vision and image generation models
 - Conversation history with configurable max rounds
 - **Kiosk Mode** for locked-down, dedicated use cases
+- **Extensible Plugin System** (v1.9.0+) for AI-powered customization in kiosk mode
 
 ## Environment Variables
 
@@ -153,6 +154,327 @@ For backward compatibility, you can still use the legacy `log_chats` setting, wh
 [logging]
 log_chats = minimum
 ```
+
+## Plugin System (v1.9.0+)
+
+The plugin system enables powerful, AI-driven customization of kiosk mode through a flexible hook architecture. Plugins can transform messages, add features, and integrate external services.
+
+### Overview
+
+The plugin system provides:
+- **10 fine-grained hooks** for message transformation at every stage
+- **AI helper utilities** for calling vision models, expanding captions, etc.
+- **Robust error handling** with timeouts and automatic plugin disabling on failures
+- **Rich context** passed to every hook with session data, history, metadata
+- **Easy development** with base class, comprehensive docs, and examples
+
+### Quick Start
+
+1. **Enable plugins** in `kiosk.conf`:
+```ini
+[PluginConfig]
+enabled = true
+timeout = 5.0
+max_failures = 3
+debug = false
+```
+
+2. **Create your plugin** (`kiosk-custom.py`):
+```python
+from kiosk_plugin_base import KioskPlugin
+
+class MyPlugin(KioskPlugin):
+    def pre_user_text(self, text, context):
+        # Transform user input before processing
+        return text.strip().lower()
+    
+    def post_assistant_text(self, text, context):
+        # Modify bot responses before sending
+        return text + "\n\nPowered by AI"
+    
+    # Implement all 10 hooks (can be pass-through)
+    def post_user_text(self, text, context): return text
+    def pre_user_images(self, images, text, context): return images
+    def post_user_images(self, images, text, context): return images
+    def pre_assistant_text(self, text, context): return text
+    def pre_assistant_images(self, images, text, context): return images
+    def post_assistant_images(self, images, text, context): return images
+    def on_session_start(self, context): pass
+    def on_message_complete(self, context): pass
+```
+
+3. **Restart the bot** to load the plugin
+
+### Hook Reference
+
+All hooks receive a `context` dict with:
+- `session_data` - Full session data (use carefully!)
+- `chat_id` - Current chat/session ID
+- `history` - Conversation history
+- `metadata` - Plugin-specific metadata dict (for storing state)
+- `ai_helper` - PluginAIHelper instance for AI calls
+- `model` - Current model name
+- `kiosk_mode` - Always True (plugins only work in kiosk mode)
+
+#### Text Processing Hooks
+
+**`pre_user_text(text, context) -> str`**
+- Called: Immediately after receiving user message
+- Use for: Input validation, profanity filtering, preprocessing
+
+**`post_user_text(text, context) -> str`**
+- Called: After prompt enhancement, before sending to AI
+- Use for: Adding context, modifying prompts
+
+**`pre_assistant_text(text, context) -> str`**
+- Called: Immediately after receiving AI response
+- Use for: Detecting patterns (LaTeX, code blocks), metadata extraction
+
+**`post_assistant_text(text, context) -> str`**
+- Called: Before sending response to user
+- Use for: Formatting, adding disclaimers, replacing placeholders
+
+#### Image Processing Hooks
+
+**`pre_user_images(images: List[str], text, context) -> List[str]`**
+- Called: After receiving images, before adding to message
+- Images are base64-encoded strings
+- Use for: AI-powered caption expansion, image validation
+
+**`post_user_images(images, text, context) -> List[str]`**
+- Called: After adding images to message, before sending to AI
+- Use for: Image preprocessing, adding watermarks
+
+**`pre_assistant_images(images, text, context) -> List[str]`**
+- Called: Immediately after receiving AI-generated images
+- Use for: Rendering LaTeX formulas as images, adding visualizations
+
+**`post_assistant_images(images, text, context) -> List[str]`**
+- Called: Before sending images to user
+- Use for: Adding generated images (syntax highlighting), postprocessing
+
+#### Lifecycle Hooks
+
+**`on_session_start(context) -> None`**
+- Called: When a new session is initialized
+- Use for: Setup, initialization, welcome logic, analytics
+
+**`on_message_complete(context) -> None`**
+- Called: After complete user+assistant exchange
+- Use for: Logging, analytics, cleanup, state updates
+
+### Custom Slash Commands
+
+Plugins can register custom slash commands that execute arbitrary code. Commands work in both kiosk and regular modes.
+
+**`get_commands() -> Dict[str, Dict[str, Any]]`**
+- Returns: Dictionary mapping command names to command info
+- Called: Once during plugin initialization
+
+```python
+def get_commands(self):
+    return {
+        'generate-worksheets': {
+            'description': 'Generate practice worksheets',
+            'handler': self.handle_generate_worksheets,
+            'available_in_kiosk': True
+        }
+    }
+
+def handle_generate_worksheets(self, chat_id, context):
+    # Send initial status message
+    self.send_message(chat_id, "📝 Generating... Please wait.", context)
+    
+    # Use AI to generate content
+    ai_helper = context['ai_helper']
+    worksheet = ai_helper.quick_call(
+        system="Create educational worksheets",
+        user="Generate 5 math problems"
+    )
+    
+    # Create HTML document
+    html_content = f"<html><body>{worksheet}</body></html>"
+    html_bytes = html_content.encode('utf-8')
+    
+    # Send as downloadable file
+    self.send_document(
+        chat_id, 
+        html_bytes,
+        'worksheet.html',
+        '✅ Here is your worksheet!',
+        context
+    )
+```
+
+**Helper methods for commands:**
+- `send_message(chat_id, text, context)` - Send text messages
+- `send_document(chat_id, data, filename, caption, context)` - Send files/documents
+
+Commands automatically appear in `/help` and are available immediately after plugin loads.
+
+### AI Helper API
+
+The `ai_helper` object provides utilities for plugin development:
+
+```python
+# Call AI with text and/or images
+response = context['ai_helper'].call_ai(
+    prompt="Describe this image",
+    model="gpt-4o-mini",  # Optional, defaults to gpt-4o-mini
+    max_tokens=500,
+    images=["base64_img_data"]  # Optional list
+)
+
+# Quick system+user message call
+response = context['ai_helper'].quick_call(
+    system="You are a helpful assistant",
+    user="What is 2+2?",
+    model="gpt-4o-mini"  # Optional
+)
+
+# Convert between PIL and base64 (requires Pillow)
+pil_image = context['ai_helper'].base64_to_pil(base64_string)
+base64_string = context['ai_helper'].pil_to_base64(pil_image, format='PNG')
+```
+
+### Example: Caption Expansion Plugin
+
+```python
+from kiosk_plugin_base import KioskPlugin
+
+class CaptionExpander(KioskPlugin):
+    def pre_user_images(self, images, text, context):
+        """Auto-expand brief captions using AI vision"""
+        if images and len(text.strip()) < 20:
+            ai_helper = context['ai_helper']
+            description = ai_helper.call_ai(
+                prompt="Describe this image briefly (1-2 sentences)",
+                model="gpt-4o-mini",
+                max_tokens=150,
+                images=[images[0]]
+            )
+            if description:
+                # Store for later use
+                context['metadata']['ai_caption'] = description
+                print(f"[Plugin] Generated caption: {description[:50]}...")
+        return images
+    
+    # ... implement other hooks as pass-through ...
+```
+
+### Example Plugin Features
+
+See `kiosk-custom.py.example` for a full-featured plugin demonstrating:
+
+1. **AI Vision Caption Expansion** - Auto-describe images with brief/no text
+2. **LaTeX Rendering** - Detect `$formula$` and render to images
+3. **Syntax Highlighting** - Render code blocks as highlighted images
+4. **Profanity Filter** - Basic word filtering on user input
+5. **Analytics** - Track message counts and usage in metadata
+6. **Custom Commands** - `/generate-worksheets` and `/summary` commands that:
+   - Send multiple progress messages
+   - Use AI to analyze conversation history
+   - Generate and send HTML documents
+   - Work in both kiosk and regular modes
+
+All features gracefully degrade if dependencies (matplotlib, pygments) are missing.
+
+### Configuration
+
+```ini
+[PluginConfig]
+# Enable/disable plugin system
+enabled = true
+
+# Maximum hook execution time (seconds)
+timeout = 5.0
+
+# Max failures before auto-disable
+max_failures = 3
+
+# Debug logging for plugin execution
+debug = false
+```
+
+### Testing
+
+Run the comprehensive test suite:
+```bash
+python test_kiosk_plugin.py
+```
+
+Tests cover:
+- Plugin base class structure
+- Hook invocation and data transformation
+- Error handling and timeout behavior
+- AI helper utilities
+- Health monitoring
+- Context building
+- Full pipeline integration
+
+### Security & Best Practices
+
+1. **Timeout Protection** - All hooks have 5s default timeout to prevent hanging
+2. **Error Isolation** - Plugin errors won't crash the bot; original data passes through
+3. **Health Monitoring** - Plugins auto-disable after repeated failures
+4. **No Arbitrary Imports** - Plugin file is loaded directly, not via exec()
+5. **Context Immutability** - Avoid mutating session_data directly; use metadata dict
+6. **Graceful Degradation** - Handle missing dependencies cleanly
+
+### Advanced Usage
+
+**Using Metadata for State:**
+```python
+def on_session_start(self, context):
+    context['metadata']['message_count'] = 0
+    context['metadata']['images_processed'] = 0
+
+def on_message_complete(self, context):
+    context['metadata']['message_count'] += 1
+```
+
+**Chaining Transformations:**
+```python
+def pre_assistant_text(self, text, context):
+    # Detect LaTeX formulas
+    context['metadata']['has_latex'] = '$$' in text
+    return text
+
+def pre_assistant_images(self, images, text, context):
+    # Render formulas if detected
+    if context['metadata'].get('has_latex'):
+        rendered = self._render_latex_formulas(text)
+        images.extend(rendered)
+    return images
+```
+
+**Conditional Processing:**
+```python
+def post_user_text(self, text, context):
+    # Only process for certain users or sessions
+    if context['chat_id'] in self.premium_users:
+        return self.enhance_premium(text)
+    return text
+```
+
+### Troubleshooting
+
+**Plugin not loading:**
+- Check file is named exactly `kiosk-custom.py`
+- Ensure plugin class inherits from `KioskPlugin`
+- Verify all 10 methods are implemented
+- Check console for error messages
+
+**Plugin disabled automatically:**
+- Check logs for error messages
+- Verify hooks don't exceed timeout
+- Ensure no uncaught exceptions
+- Increase `max_failures` if needed
+
+**AI helper not working:**
+- Verify `OPENROUTER_API_KEY` is set
+- Check network connectivity
+- Review debug logs for API errors
 
 ## Commands
 

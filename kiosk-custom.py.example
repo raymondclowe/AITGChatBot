@@ -1,0 +1,576 @@
+"""
+Example Kiosk Plugin - Advanced Features Showcase
+
+This example demonstrates the full capabilities of the kiosk plugin system:
+- Caption expansion for images with brief text (AI-powered vision)
+- LaTeX formula detection and rendering to images
+- Code block syntax highlighting as images
+- Simple profanity filter
+- Custom slash commands
+
+To use this plugin:
+1. Copy this file to kiosk-custom.py
+2. Enable plugins in kiosk.conf: [PluginConfig] enabled = true
+3. Restart the bot
+
+All features gracefully degrade if dependencies are missing.
+"""
+
+import re
+import base64
+from typing import List, Dict, Any
+from io import BytesIO
+from datetime import datetime
+
+from kiosk_plugin_base import KioskPlugin
+
+# Optional dependencies - features disable gracefully if not available
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    print("⚠️  PIL not available - image processing features disabled")
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')  # Non-interactive backend
+    import matplotlib.pyplot as plt
+    from matplotlib import mathtext
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("⚠️  Matplotlib not available - LaTeX rendering disabled")
+
+try:
+    from pygments import highlight
+    from pygments.lexers import get_lexer_by_name, guess_lexer
+    from pygments.formatters import ImageFormatter
+    PYGMENTS_AVAILABLE = True
+except ImportError:
+    PYGMENTS_AVAILABLE = False
+    print("⚠️  Pygments not available - syntax highlighting disabled")
+
+
+class AdvancedKioskPlugin(KioskPlugin):
+    """
+    Advanced example plugin showcasing AI-powered transformations and rendering.
+    
+    Features:
+    - Automatic image caption expansion (AI vision)
+    - LaTeX formula rendering to images
+    - Code syntax highlighting as images
+    - Basic profanity filtering
+    """
+    
+    def __init__(self):
+        """Initialize the plugin with configuration."""
+        self.profanity_list = ['badword1', 'badword2']  # Example list
+        self.logger_enabled = True
+    
+    def log(self, message: str):
+        """Simple logging helper."""
+        if self.logger_enabled:
+            print(f"[Plugin] {message}")
+    
+    def pre_user_text(self, text: str, context: Dict[str, Any]) -> str:
+        """
+        Process user text before it enters the system.
+        
+        This hook is called immediately after receiving the user's message.
+        Use it for input validation, preprocessing, or enrichment.
+        
+        Example: Basic profanity filter
+        """
+        # Simple profanity filter (replace with stars)
+        filtered_text = text
+        for word in self.profanity_list:
+            if word in filtered_text.lower():
+                filtered_text = re.sub(
+                    rf'\b{re.escape(word)}\b',
+                    '*' * len(word),
+                    filtered_text,
+                    flags=re.IGNORECASE
+                )
+                self.log(f"Filtered profanity in user text")
+        
+        return filtered_text
+    
+    def post_user_text(self, text: str, context: Dict[str, Any]) -> str:
+        """
+        Process user text after initial processing but before sending to AI.
+        
+        This hook is called after prompt enhancement but before the message
+        is added to the conversation history.
+        
+        Example: Track message metrics
+        """
+        # Store message length in metadata for analytics
+        metadata = context.get('metadata', {})
+        metadata['last_user_message_length'] = len(text)
+        
+        return text
+    
+    def pre_user_images(self, images: List[str], text: str, context: Dict[str, Any]) -> List[str]:
+        """
+        Process user images before they enter the system.
+        
+        This hook is called after receiving images but before adding to the message.
+        
+        Example: Auto-expand brief captions using AI vision
+        """
+        # If user sent images with very brief or no text, use AI to describe them
+        if images and len(text.strip()) < 20:
+            self.log(f"Detected {len(images)} image(s) with brief text, expanding caption...")
+            
+            ai_helper = context.get('ai_helper')
+            if ai_helper:
+                try:
+                    # Use AI vision to describe the first image
+                    prompt = "Describe this image in 1-2 sentences, focusing on key details."
+                    description = ai_helper.call_ai(
+                        prompt=prompt,
+                        model="gpt-4o-mini",
+                        max_tokens=150,
+                        images=[images[0]]
+                    )
+                    
+                    if description:
+                        # Store the AI description in metadata for later use
+                        metadata = context.get('metadata', {})
+                        metadata['ai_caption'] = description
+                        self.log(f"Generated caption: {description[:50]}...")
+                except Exception as e:
+                    self.log(f"Error generating caption: {e}")
+        
+        return images
+    
+    def post_user_images(self, images: List[str], text: str, context: Dict[str, Any]) -> List[str]:
+        """
+        Process user images after initial processing.
+        
+        This hook is called after images are added to the message but before
+        sending to the AI.
+        
+        Example: Add watermark or metadata validation
+        """
+        # Could add watermark, resize, or validate format here
+        return images
+    
+    def pre_assistant_text(self, text: str, context: Dict[str, Any]) -> str:
+        """
+        Process assistant text immediately after receiving from AI.
+        
+        This hook is called right after extracting the AI's response text.
+        
+        Example: Detect and render LaTeX formulas
+        """
+        # Detect LaTeX formulas in the response
+        # Pattern matches both inline $...$ and display $$...$$ formulas
+        latex_pattern = r'\$\$(.*?)\$\$|\$(.*?)\$'
+        
+        matches = list(re.finditer(latex_pattern, text))
+        if matches and MATPLOTLIB_AVAILABLE:
+            self.log(f"Detected {len(matches)} LaTeX formula(s), will render to images")
+            
+            # Store formulas in metadata for rendering in image hook
+            metadata = context.get('metadata', {})
+            metadata['latex_formulas'] = []
+            
+            for match in matches:
+                formula = match.group(1) if match.group(1) else match.group(2)
+                display_mode = match.group(1) is not None
+                metadata['latex_formulas'].append({
+                    'formula': formula,
+                    'display': display_mode,
+                    'full_match': match.group(0)
+                })
+        
+        return text
+    
+    def post_assistant_text(self, text: str, context: Dict[str, Any]) -> str:
+        """
+        Process assistant text before sending to user.
+        
+        This hook is called after all processing but before sending to Telegram.
+        
+        Example: Remove LaTeX markup (since we'll send as images)
+        """
+        metadata = context.get('metadata', {})
+        formulas = metadata.get('latex_formulas', [])
+        
+        if formulas:
+            # Replace LaTeX formulas with placeholders
+            modified_text = text
+            for i, formula_data in enumerate(formulas):
+                placeholder = f"[Formula {i+1}]"
+                modified_text = modified_text.replace(
+                    formula_data['full_match'],
+                    placeholder,
+                    1
+                )
+            
+            self.log(f"Replaced {len(formulas)} LaTeX formula(s) with placeholders")
+            return modified_text
+        
+        return text
+    
+    def pre_assistant_images(self, images: List[str], text: str, context: Dict[str, Any]) -> List[str]:
+        """
+        Process assistant images immediately after receiving from AI.
+        
+        This hook is called right after extracting images from the AI response.
+        
+        Example: Render LaTeX formulas as images
+        """
+        metadata = context.get('metadata', {})
+        formulas = metadata.get('latex_formulas', [])
+        
+        if formulas and MATPLOTLIB_AVAILABLE and PIL_AVAILABLE:
+            self.log(f"Rendering {len(formulas)} LaTeX formula(s) to images")
+            
+            for formula_data in formulas:
+                try:
+                    formula_image = self._render_latex(formula_data['formula'])
+                    if formula_image:
+                        images.append(formula_image)
+                        self.log(f"Successfully rendered formula: {formula_data['formula'][:30]}...")
+                except Exception as e:
+                    self.log(f"Error rendering formula: {e}")
+        
+        return images
+    
+    def post_assistant_images(self, images: List[str], text: str, context: Dict[str, Any]) -> List[str]:
+        """
+        Process assistant images before sending to user.
+        
+        This hook is called after all processing but before sending to Telegram.
+        
+        Example: Syntax highlight code blocks as images
+        """
+        # Detect code blocks in text
+        code_pattern = r'```(\w+)?\n(.*?)```'
+        matches = list(re.finditer(code_pattern, text, re.DOTALL))
+        
+        if matches and PYGMENTS_AVAILABLE and PIL_AVAILABLE:
+            self.log(f"Detected {len(matches)} code block(s), will render as images")
+            
+            for match in matches:
+                language = match.group(1) or 'python'
+                code = match.group(2)
+                
+                try:
+                    code_image = self._render_code(code, language)
+                    if code_image:
+                        images.append(code_image)
+                        self.log(f"Successfully rendered {language} code block")
+                except Exception as e:
+                    self.log(f"Error rendering code: {e}")
+        
+        return images
+    
+    def on_session_start(self, context: Dict[str, Any]) -> None:
+        """
+        Called when a new session is initialized.
+        
+        Use this for setup, initialization, or welcome logic.
+        """
+        chat_id = context.get('chat_id')
+        self.log(f"Session started for chat {chat_id}")
+        
+        # Initialize session-specific metadata
+        metadata = context.get('metadata', {})
+        metadata['message_count'] = 0
+        metadata['images_processed'] = 0
+    
+    def on_message_complete(self, context: Dict[str, Any]) -> None:
+        """
+        Called after a complete message exchange (user + assistant).
+        
+        Use this for logging, analytics, or cleanup.
+        """
+        # Update message statistics
+        metadata = context.get('metadata', {})
+        metadata['message_count'] = metadata.get('message_count', 0) + 1
+        
+        chat_id = context.get('chat_id')
+        msg_count = metadata.get('message_count')
+        self.log(f"Message complete for chat {chat_id} (total: {msg_count})")
+    
+    # Helper methods
+    
+    def _render_latex(self, formula: str) -> str:
+        """
+        Render a LaTeX formula to a base64-encoded image.
+        
+        Args:
+            formula: LaTeX formula string
+        
+        Returns:
+            Base64-encoded PNG image
+        """
+        if not MATPLOTLIB_AVAILABLE or not PIL_AVAILABLE:
+            return None
+        
+        try:
+            # Create figure
+            fig = plt.figure(figsize=(6, 1))
+            fig.patch.set_facecolor('white')
+            
+            # Render LaTeX
+            text = fig.text(
+                0.5, 0.5, f'${formula}$',
+                horizontalalignment='center',
+                verticalalignment='center',
+                fontsize=20
+            )
+            
+            # Save to buffer
+            buffer = BytesIO()
+            plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', 
+                       facecolor='white', edgecolor='none')
+            plt.close(fig)
+            
+            # Convert to base64
+            buffer.seek(0)
+            b64_string = base64.b64encode(buffer.read()).decode('utf-8')
+            
+            return b64_string
+            
+        except Exception as e:
+            self.log(f"Error in _render_latex: {e}")
+            return None
+    
+    def _render_code(self, code: str, language: str) -> str:
+        """
+        Render syntax-highlighted code to a base64-encoded image.
+        
+        Args:
+            code: Source code string
+            language: Programming language
+        
+        Returns:
+            Base64-encoded PNG image
+        """
+        if not PYGMENTS_AVAILABLE or not PIL_AVAILABLE:
+            return None
+        
+        try:
+            # Get lexer
+            try:
+                lexer = get_lexer_by_name(language)
+            except:
+                lexer = guess_lexer(code)
+            
+            # Create image formatter
+            formatter = ImageFormatter(
+                font_name='monospace',
+                font_size=14,
+                line_numbers=True,
+                style='colorful'
+            )
+            
+            # Highlight code
+            result = highlight(code, lexer, formatter)
+            
+            # Convert to base64
+            b64_string = base64.b64encode(result).decode('utf-8')
+            
+            return b64_string
+            
+        except Exception as e:
+            self.log(f"Error in _render_code: {e}")
+            return None
+    
+    def get_commands(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Register custom commands for this plugin.
+        
+        Returns:
+            Dictionary of command name -> command info
+        """
+        return {
+            'generate-worksheets': {
+                'description': 'Generate practice worksheets based on conversation',
+                'handler': self.handle_generate_worksheets,
+                'available_in_kiosk': True
+            },
+            'summary': {
+                'description': 'Get a summary of the current conversation',
+                'handler': self.handle_summary,
+                'available_in_kiosk': True
+            }
+        }
+    
+    def handle_generate_worksheets(self, chat_id: str, context: Dict[str, Any]) -> None:
+        """
+        Command handler: Generate practice worksheets.
+        
+        This is an example showing how plugins can:
+        - Send multiple messages
+        - Use AI to analyze conversation
+        - Generate and send documents
+        
+        Args:
+            chat_id: The chat ID
+            context: Rich context dictionary
+        """
+        # Send initial message
+        self.send_message(chat_id, "📝 Generating worksheets... Please wait.", context)
+        
+        try:
+            # Get conversation history
+            history = context.get('history', [])
+            
+            if not history or len(history) < 2:
+                self.send_message(chat_id, "❌ Not enough conversation history to generate worksheets. Please chat more first!", context)
+                return
+            
+            # Use AI to analyze conversation and generate worksheet
+            ai_helper = context.get('ai_helper')
+            if ai_helper:
+                # Build prompt for worksheet generation
+                conversation_text = self._extract_conversation_text(history)
+                
+                prompt = f"""Based on this conversation about math/homework:
+
+{conversation_text}
+
+Generate 5 practice problems similar to what was discussed. Format as:
+Problem 1: [question]
+Problem 2: [question]
+...
+
+Make them educational and appropriate for the student's level."""
+                
+                self.log("Calling AI to generate worksheet...")
+                worksheet_content = ai_helper.quick_call(
+                    system="You are a helpful educational assistant that creates practice problems.",
+                    user=prompt,
+                    model="gpt-4o-mini"
+                )
+                
+                if worksheet_content:
+                    # Create HTML document
+                    html_content = self._create_worksheet_html(worksheet_content)
+                    
+                    # Send as document
+                    html_bytes = html_content.encode('utf-8')
+                    self.send_document(
+                        chat_id,
+                        html_bytes,
+                        'practice_worksheet.html',
+                        '✅ Here is your practice worksheet! Save and open in a browser to print.',
+                        context
+                    )
+                    self.log(f"Successfully generated worksheet for chat {chat_id}")
+                else:
+                    self.send_message(chat_id, "❌ Failed to generate worksheet content. Please try again.", context)
+            else:
+                self.send_message(chat_id, "❌ AI helper not available.", context)
+                
+        except Exception as e:
+            self.log(f"Error generating worksheets: {e}")
+            self.send_message(chat_id, f"❌ Error generating worksheets: {str(e)}", context)
+    
+    def handle_summary(self, chat_id: str, context: Dict[str, Any]) -> None:
+        """
+        Command handler: Generate conversation summary.
+        
+        Args:
+            chat_id: The chat ID
+            context: Rich context dictionary
+        """
+        self.send_message(chat_id, "📊 Generating summary... Please wait.", context)
+        
+        try:
+            history = context.get('history', [])
+            
+            if not history or len(history) < 2:
+                self.send_message(chat_id, "❌ Not enough conversation history to summarize.", context)
+                return
+            
+            # Extract conversation
+            conversation_text = self._extract_conversation_text(history)
+            
+            # Get AI summary
+            ai_helper = context.get('ai_helper')
+            if ai_helper:
+                summary = ai_helper.quick_call(
+                    system="You are a helpful assistant that creates brief, clear summaries.",
+                    user=f"Summarize this conversation in 3-5 bullet points:\n\n{conversation_text}",
+                    model="gpt-4o-mini"
+                )
+                
+                if summary:
+                    self.send_message(chat_id, f"📋 **Conversation Summary:**\n\n{summary}", context)
+                else:
+                    self.send_message(chat_id, "❌ Failed to generate summary.", context)
+            else:
+                self.send_message(chat_id, "❌ AI helper not available.", context)
+                
+        except Exception as e:
+            self.log(f"Error generating summary: {e}")
+            self.send_message(chat_id, f"❌ Error: {str(e)}", context)
+    
+    def _extract_conversation_text(self, history: List[Dict[str, Any]], max_messages: int = 20) -> str:
+        """Extract text from conversation history."""
+        texts = []
+        for msg in history[-max_messages:]:
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', [])
+            
+            # Extract text from content
+            text_parts = []
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        text_parts.append(item.get('text', ''))
+            elif isinstance(content, str):
+                text_parts.append(content)
+            
+            if text_parts:
+                texts.append(f"{role}: {' '.join(text_parts)}")
+        
+        return '\n'.join(texts)
+    
+    def _create_worksheet_html(self, content: str) -> str:
+        """Create an HTML document for the worksheet."""
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Practice Worksheet</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }}
+        h1 {{ color: #333; }}
+        .problem {{ margin: 20px 0; padding: 15px; background: #f5f5f5; border-left: 4px solid #4CAF50; }}
+        .footer {{ margin-top: 40px; color: #666; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <h1>📝 Practice Worksheet</h1>
+    <p>Generated by AI Tutor</p>
+    <hr>
+    <div class="problems">
+        {self._format_problems_html(content)}
+    </div>
+    <div class="footer">
+        <p>Generated on: {self._get_timestamp()}</p>
+        <p>Print this page and work through each problem. Check your answers with your tutor!</p>
+    </div>
+</body>
+</html>"""
+        return html
+    
+    def _format_problems_html(self, content: str) -> str:
+        """Format problem text as HTML divs."""
+        problems = content.split('\n')
+        html_parts = []
+        for problem in problems:
+            if problem.strip():
+                html_parts.append(f'<div class="problem">{problem}</div>')
+        return '\n'.join(html_parts)
+    
+    def _get_timestamp(self) -> str:
+        """Get current timestamp."""
+        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
