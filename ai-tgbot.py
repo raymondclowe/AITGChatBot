@@ -1,4 +1,4 @@
-version = "1.9.0"
+version = "1.9.1"
 
 # changelog
 # 1.1.0 - llama3 using groq
@@ -8,9 +8,10 @@ version = "1.9.0"
 # 1.5.0 - openrouter buttons
 # 1.6.0 - image in and out
 # 1.7.0 - kiosk mode for locked-down dedicated instances
-# 1.7.1 - fix missing text description when image is generated (reasoning field fallback)
+# 1.7.1 - fix missing text description when image is generated (reasoning field fallback) - REVERTED in 1.9.1
 # 1.8.0 - ensure image-capable models in kiosk mode return both image and text
 # 1.9.0 - extensible plugin system for kiosk mode with AI-powered transformations
+# 1.9.1 - remove reasoning field fallback to prevent showing internal model thinking
 
 import requests
 import base64
@@ -1149,12 +1150,8 @@ def get_reply(message, image_data_64_list, session_id):
                 # Simple string response (OpenRouter format: text in content, images in separate array)
                 response_text = message_content.strip() if message_content else ""
             
-            # Fall back to reasoning field if content is empty but reasoning exists
-            # (e.g., Google Gemini via OpenRouter puts explanatory text in reasoning for image responses)
-            reasoning_text = message.get("reasoning")
-            if not response_text and reasoning_text and isinstance(reasoning_text, str) and reasoning_text.strip():
-                response_text = reasoning_text.strip()
-                print(f"Using reasoning field as fallback: {response_text[:100]}...")
+            # Note: The "reasoning" field contains the model's internal thinking process
+            # and should NOT be displayed to users. We intentionally do not use it as a fallback.
             
             # In kiosk mode with image-capable models, warn if images were generated without text
             if KIOSK_MODE and model_supports_image_output(model) and images_received and not response_text:
