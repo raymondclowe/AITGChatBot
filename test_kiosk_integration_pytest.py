@@ -45,7 +45,9 @@ def kiosk_session_data():
             'tokens_used': 50,
             'max_rounds': 4,
             'notification_shown': False,
-            'response_format': 'auto'
+            'modalities': 'auto',
+            'aspect_ratio': None,
+            'image_size': None
         }
     }
 

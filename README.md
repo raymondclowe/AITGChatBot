@@ -482,7 +482,7 @@ def post_user_text(self, text, context):
 - `/help` - Show help message
 - `/clear` - Clear conversation context
 - `/status` - Show current chatbot status
-- `/format <option>` - Set response format preference (auto/text/image/both)
+- `/format <modality> [aspect_ratio] [image_size]` - Control what model generates (see below)
 - `/maxrounds <n>` - Set max conversation rounds
 - `/gpt3`, `/gpt4`, `/gpt4o`, `/gpt4omini` - Switch to OpenAI models
 - `/claud3opus`, `/claud3haiku` - Switch to Anthropic Claude models
@@ -495,26 +495,34 @@ def post_user_text(self, text, context):
 - `/help` - Show kiosk mode help
 - `/clear` - Clear conversation context
 - `/status` - Show current status (with kiosk mode indicator)
-- `/format <option>` - Set response format preference (auto/text/image/both)
+- `/format <modality> [aspect_ratio] [image_size]` - Control what model generates (see below)
 
-### Response Format Options
+### Format Command - Controlling Model Output
 
-The `/format` command allows you to control the format of AI responses:
+The `/format` command controls **what you ask the model to generate** via the OpenRouter API's `modalities` and `image_config` parameters. The user always sees everything the model returns (except duplicates).
 
-- `auto` (default) - Model decides whether to include text, images, or both
-- `text` - Show only text responses (images are filtered out)
-- `image` - Show only images (text is filtered out)
-- `both` - Require both text and images in responses
+**Modalities** (what to request from the model):
+- `auto` (default) - Let the model decide
+- `text` - Request text-only responses
+- `image` - Request image-only responses  
+- `text+image` - Request both text and image
 
-Use `/format` without arguments to see the current setting and available options.
-Use `/status` to see your current response format preference.
+**Aspect Ratios** (optional, for Gemini models):
+- `1:1`, `16:9`, `9:16`, `4:3`, `3:4`
+
+**Image Sizes** (optional, for Gemini models):
+- `SD`, `HD`, `4K`
 
 **Example Usage:**
 ```
-/format text      # Set to text-only responses
-/format both      # Require both text and images
-/format auto      # Return to default (model decides)
+/format text+image          # Request both text and image
+/format image 16:9 4K       # Request 4K image with 16:9 aspect ratio
+/format text+image 1:1 HD   # Request both, with 1:1 HD image
+/format auto                # Let model decide
 ```
+
+Use `/format` without arguments to see current settings.
+Use `/status` to see your current format configuration.
 
 ## Developer Notes
 
