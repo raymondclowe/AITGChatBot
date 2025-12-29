@@ -8,7 +8,7 @@ version = "1.9.1"
 # 1.5.0 - openrouter buttons
 # 1.6.0 - image in and out
 # 1.7.0 - kiosk mode for locked-down dedicated instances
-# 1.7.1 - fix missing text description when image is generated (reasoning field fallback) - REVERTED in 1.9.1
+# 1.7.1 - fix missing text description when image is generated (reasoning field fallback) - REVERTED in 1.9.1 due to displaying internal model reasoning to users
 # 1.8.0 - ensure image-capable models in kiosk mode return both image and text
 # 1.9.0 - extensible plugin system for kiosk mode with AI-powered transformations
 # 1.9.1 - remove reasoning field fallback to prevent showing internal model thinking
