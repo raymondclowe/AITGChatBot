@@ -160,6 +160,16 @@ IMAGE_REQUEST_KEYWORDS = [
     'generate', 'make', 'design'
 ]
 
+# Response format options (for OpenRouter modalities parameter)
+# These control what the model is asked to generate, not what is shown to user
+VALID_MODALITIES = ['auto', 'text', 'image', 'text+image']
+
+# Valid aspect ratios for image generation (Gemini models)
+VALID_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
+
+# Valid image sizes for image generation (Gemini models)  
+VALID_IMAGE_SIZES = ['SD', 'HD', '4K']
+
 # Chat logging configuration
 # Settings loaded from kiosk.conf file and command line
 CHAT_LOG_LEVEL = 'off'  # off, minimum, extended (deprecated - use separate levels)
@@ -573,7 +583,10 @@ def initialize_session(chat_id):
         'CONVERSATION': [],
         'tokens_used': 0,
         'max_rounds': DEFAULT_MAX_ROUNDS,
-        'last_activity': time.time()
+        'last_activity': time.time(),
+        'modalities': 'auto',  # Controls what model generates: auto, text, image, text+image
+        'aspect_ratio': None,  # Optional aspect ratio for image generation
+        'image_size': None     # Optional image size for image generation
     }
     
     # Set provider for openrouter models
@@ -840,6 +853,26 @@ def get_reply(message, image_data_64_list, session_id):
             "max_tokens": 4000,
             "messages": session_data[session_id]["CONVERSATION"],
         }
+        
+        # Add modalities if specified (controls what model generates)
+        modalities = session_data[session_id].get('modalities', 'auto')
+        if modalities != 'auto':
+            # Convert our format to OpenRouter format
+            if modalities == 'text+image':
+                payload["modalities"] = ["text", "image"]
+            else:
+                payload["modalities"] = [modalities]
+        
+        # Add image_config if aspect_ratio or image_size specified (for Gemini models)
+        aspect_ratio = session_data[session_id].get('aspect_ratio')
+        image_size = session_data[session_id].get('image_size')
+        if aspect_ratio or image_size:
+            image_config = {}
+            if aspect_ratio:
+                image_config["aspect_ratio"] = aspect_ratio
+            if image_size:
+                image_config["image_size"] = image_size
+            payload["image_config"] = image_config
         
         # For image-capable models in kiosk mode, log that we're using an image model
         # The system prompt has already been enhanced to request both text and images
@@ -1683,7 +1716,8 @@ def long_polling():
                         reply_text += "/start - show this welcome message\n"
                         reply_text += "/help - show help information\n"
                         reply_text += "/clear - clear the conversation context\n"
-                        reply_text += "/status - view current chatbot status\n\n"
+                        reply_text += "/status - view current chatbot status\n"
+                        reply_text += "/format - set output modalities and image options\n\n"
                         reply_text += "Simply type your message or send an image to start chatting!"
                     else:
                         reply_text = "👋 Welcome to AI Telegram ChatBot!\n\n"
@@ -1692,7 +1726,8 @@ def long_polling():
                         reply_text += "/start - show this welcome message\n"
                         reply_text += "/help - show detailed help\n"
                         reply_text += "/status - view current status\n"
-                        reply_text += "/clear - clear conversation context\n\n"
+                        reply_text += "/clear - clear conversation context\n"
+                        reply_text += "/format - set output modalities\n\n"
                         reply_text += "Type /help for a full list of commands and features.\n"
                         reply_text += "Simply type your message or send an image to start chatting!"
                     send_message(chat_id, reply_text)
@@ -1708,6 +1743,7 @@ def long_polling():
                         reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the conversation context\n"
                         reply_text += "/status - view current chatbot status\n"
+                        reply_text += "/format <modality> [aspect] [size] - set output modalities and image options\n"
                         
                         # Add plugin commands if available
                         if plugin_manager:
@@ -1725,6 +1761,7 @@ def long_polling():
                         reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the context\n"
                         reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
+                        reply_text += "/format <modality> [aspect] [size] - set output modalities and image options\n"
                         reply_text += "/gpt3 - set the model to gpt3\n"
                         reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
                         reply_text += "/gpt4o - set the model to gpt-4o\n"
@@ -1772,6 +1809,17 @@ def long_polling():
                     
                     reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                     reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
+                    
+                    # Show format settings
+                    modalities = session_data[chat_id].get('modalities', 'auto')
+                    reply_text += f"Modalities: {modalities}\n"
+                    aspect_ratio = session_data[chat_id].get('aspect_ratio')
+                    if aspect_ratio:
+                        reply_text += f"Aspect ratio: {aspect_ratio}\n"
+                    image_size = session_data[chat_id].get('image_size')
+                    if image_size:
+                        reply_text += f"Image size: {image_size}\n"
+                    
                     reply_text += f"Chatbot version: {version}\n"
                     
                     # Show kiosk-specific info
@@ -1821,6 +1869,97 @@ def long_polling():
                     reply_text = f"Context cleared"
                     send_message(chat_id, reply_text)
                     continue  # Skip the rest of the processing loop
+    
+                # Handle /format command to set modalities and image generation options
+                elif message_text.startswith('/format'):
+                    parts = message_text.split()
+                    
+                    # If no argument provided, show current settings and help
+                    if len(parts) == 1:
+                        modalities = session_data[chat_id].get('modalities', 'auto')
+                        aspect_ratio = session_data[chat_id].get('aspect_ratio') or 'not set'
+                        image_size = session_data[chat_id].get('image_size') or 'not set'
+                        
+                        reply_text = f"📋 Current settings:\n"
+                        reply_text += f"  Modalities: {modalities}\n"
+                        reply_text += f"  Aspect ratio: {aspect_ratio}\n"
+                        reply_text += f"  Image size: {image_size}\n\n"
+                        reply_text += "Usage: /format <modality> [aspect_ratio] [image_size]\n\n"
+                        reply_text += "Modalities (what to request from model):\n"
+                        reply_text += "  auto - Model decides (default)\n"
+                        reply_text += "  text - Request text only\n"
+                        reply_text += "  image - Request image only\n"
+                        reply_text += "  text+image - Request both\n\n"
+                        reply_text += "Aspect ratios (optional, for Gemini):\n"
+                        reply_text += "  1:1, 16:9, 9:16, 4:3, 3:4\n\n"
+                        reply_text += "Image sizes (optional, for Gemini):\n"
+                        reply_text += "  SD, HD, 4K\n\n"
+                        reply_text += "Examples:\n"
+                        reply_text += "  /format text+image\n"
+                        reply_text += "  /format image 16:9 4K\n"
+                        reply_text += "  /format text+image 1:1 HD"
+                        send_message(chat_id, reply_text)
+                        continue
+                    
+                    # Parse arguments
+                    modality = parts[1].lower() if len(parts) > 1 else None
+                    aspect_ratio = None
+                    image_size = None
+                    # Disambiguate second argument: it can be either aspect_ratio or image_size.
+                    if len(parts) > 2:
+                        candidate = parts[2]
+                        candidate_upper = candidate.upper()
+                        # If it looks like a valid image size and not a valid aspect ratio,
+                        # treat it as an image size-only specification (e.g. "/format text SD").
+                        if candidate_upper in VALID_IMAGE_SIZES and candidate not in VALID_ASPECT_RATIOS:
+                            image_size = candidate_upper
+                        else:
+                            aspect_ratio = candidate
+                            if len(parts) > 3:
+                                image_size = parts[3].upper()
+                    
+                    # Validate modality
+                    if modality and modality not in VALID_MODALITIES:
+                        reply_text = f"❌ Invalid modality: {modality}\n\n"
+                        reply_text += "Valid options: auto, text, image, text+image"
+                        send_message(chat_id, reply_text)
+                        continue
+                    
+                    # Validate aspect ratio if provided
+                    if aspect_ratio and aspect_ratio not in VALID_ASPECT_RATIOS:
+                        reply_text = f"❌ Invalid aspect ratio: {aspect_ratio}\n\n"
+                        reply_text += "Valid options: " + ", ".join(VALID_ASPECT_RATIOS)
+                        send_message(chat_id, reply_text)
+                        continue
+                    
+                    # Validate image size if provided
+                    if image_size and image_size not in VALID_IMAGE_SIZES:
+                        reply_text = f"❌ Invalid image size: {image_size}\n\n"
+                        reply_text += "Valid options: " + ", ".join(VALID_IMAGE_SIZES)
+                        send_message(chat_id, reply_text)
+                        continue
+                    
+                    # Set the values
+                    if modality:
+                        session_data[chat_id]['modalities'] = modality
+                    if aspect_ratio:
+                        session_data[chat_id]['aspect_ratio'] = aspect_ratio
+                    else:
+                        session_data[chat_id]['aspect_ratio'] = None
+                    if image_size:
+                        session_data[chat_id]['image_size'] = image_size
+                    else:
+                        session_data[chat_id]['image_size'] = None
+                    
+                    # Build confirmation message
+                    reply_text = f"✅ Format settings updated:\n"
+                    reply_text += f"  Modalities: {session_data[chat_id]['modalities']}\n"
+                    if aspect_ratio:
+                        reply_text += f"  Aspect ratio: {aspect_ratio}\n"
+                    if image_size:
+                        reply_text += f"  Image size: {image_size}\n"
+                    send_message(chat_id, reply_text)
+                    continue
     
                 # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
                 elif message_text.startswith('/listopenroutermodels'):
@@ -1905,9 +2044,9 @@ def long_polling():
                             plugin_commands = plugin_manager.get_registered_commands(kiosk_mode=True) if plugin_manager else {}
                             if plugin_commands:
                                 cmd_list = ", ".join([f"/{cmd}" for cmd in plugin_commands.keys()])
-                                send_message(chat_id, f"❌ Unrecognized command. Available: /start, /help, /clear, /status, {cmd_list}. Type /help for more information.")
+                                send_message(chat_id, f"❌ Unrecognized command. Available: /start, /help, /clear, /status, /format, {cmd_list}. Type /help for more information.")
                             else:
-                                send_message(chat_id, "❌ Unrecognized command. In kiosk mode, only /start, /help, /clear, and /status are available. Type /help for more information.")
+                                send_message(chat_id, "❌ Unrecognized command. In kiosk mode, only /start, /help, /clear, /status, and /format are available. Type /help for more information.")
                         else:
                             # In normal mode, suggest help command
                             send_message(chat_id, "❌ Unrecognized command. Type /help to see available commands.")

@@ -44,7 +44,10 @@ def kiosk_session_data():
             ],
             'tokens_used': 50,
             'max_rounds': 4,
-            'notification_shown': False
+            'notification_shown': False,
+            'modalities': 'auto',
+            'aspect_ratio': None,
+            'image_size': None
         }
     }
 
@@ -101,7 +104,7 @@ class TestKioskModeBasics:
     
     def test_kiosk_available_commands(self):
         """Test that kiosk mode has specific available commands"""
-        kiosk_commands = ['/start', '/help', '/clear', '/status']
+        kiosk_commands = ['/start', '/help', '/clear', '/status', '/format']
         
         for cmd in kiosk_commands:
             assert cmd.startswith('/')
