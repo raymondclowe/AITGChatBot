@@ -47,7 +47,7 @@ When kiosk mode is enabled:
 - System prompt is loaded from file and cannot be modified
 - `/maxrounds` changes are blocked
 - `/listopenroutermodels` is disabled
-- Only `/start`, `/help`, `/clear`, and `/status` commands are available
+- Only `/start`, `/help`, `/clear`, `/status`, and `/format` commands are available
 - Unrecognized commands display helpful error messages
 - Multi-user chats are still supported with separate conversation histories
 - Visual indicator (🔒) shows kiosk mode is active
@@ -482,6 +482,7 @@ def post_user_text(self, text, context):
 - `/help` - Show help message
 - `/clear` - Clear conversation context
 - `/status` - Show current chatbot status
+- `/format <option>` - Set response format preference (auto/text/image/both)
 - `/maxrounds <n>` - Set max conversation rounds
 - `/gpt3`, `/gpt4`, `/gpt4o`, `/gpt4omini` - Switch to OpenAI models
 - `/claud3opus`, `/claud3haiku` - Switch to Anthropic Claude models
@@ -494,6 +495,26 @@ def post_user_text(self, text, context):
 - `/help` - Show kiosk mode help
 - `/clear` - Clear conversation context
 - `/status` - Show current status (with kiosk mode indicator)
+- `/format <option>` - Set response format preference (auto/text/image/both)
+
+### Response Format Options
+
+The `/format` command allows you to control the format of AI responses:
+
+- `auto` (default) - Model decides whether to include text, images, or both
+- `text` - Show only text responses (images are filtered out)
+- `image` - Show only images (text is filtered out)
+- `both` - Require both text and images in responses
+
+Use `/format` without arguments to see the current setting and available options.
+Use `/status` to see your current response format preference.
+
+**Example Usage:**
+```
+/format text      # Set to text-only responses
+/format both      # Require both text and images
+/format auto      # Return to default (model decides)
+```
 
 ## Developer Notes
 

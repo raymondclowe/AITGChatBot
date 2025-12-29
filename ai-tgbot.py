@@ -160,6 +160,14 @@ IMAGE_REQUEST_KEYWORDS = [
     'generate', 'make', 'design'
 ]
 
+# Response format options
+RESPONSE_FORMAT_AUTO = 'auto'       # Model decides (default behavior)
+RESPONSE_FORMAT_TEXT = 'text'       # Text only
+RESPONSE_FORMAT_IMAGE = 'image'     # Image only
+RESPONSE_FORMAT_BOTH = 'both'       # Both text and image
+
+VALID_RESPONSE_FORMATS = [RESPONSE_FORMAT_AUTO, RESPONSE_FORMAT_TEXT, RESPONSE_FORMAT_IMAGE, RESPONSE_FORMAT_BOTH]
+
 # Chat logging configuration
 # Settings loaded from kiosk.conf file and command line
 CHAT_LOG_LEVEL = 'off'  # off, minimum, extended (deprecated - use separate levels)
@@ -573,7 +581,8 @@ def initialize_session(chat_id):
         'CONVERSATION': [],
         'tokens_used': 0,
         'max_rounds': DEFAULT_MAX_ROUNDS,
-        'last_activity': time.time()
+        'last_activity': time.time(),
+        'response_format': RESPONSE_FORMAT_AUTO
     }
     
     # Set provider for openrouter models
@@ -678,6 +687,44 @@ def clear_context(chat_id):
         session_data[chat_id]['CONVERSATION'] = []
     
     # Don't reset notification flag on context clear - notification is per-session (first use only)
+
+
+def apply_response_format_filter(response_text, images_received, response_format):
+    """
+    Apply response format filtering based on user preference.
+    
+    Args:
+        response_text: The text response from AI
+        images_received: List of (image_data, mime_type) tuples
+        response_format: The desired format ('auto', 'text', 'image', 'both')
+    
+    Returns:
+        Tuple of (filtered_response_text, filtered_images_received)
+    """
+    if response_format == RESPONSE_FORMAT_AUTO:
+        # No filtering, return everything as-is
+        return response_text, images_received
+    elif response_format == RESPONSE_FORMAT_TEXT:
+        # Text only - remove images
+        return response_text, []
+    elif response_format == RESPONSE_FORMAT_IMAGE:
+        # Image only - remove text
+        if images_received:
+            return "", images_received
+        else:
+            # No images to show, keep text with a note
+            return response_text + "\n\n(Note: Response format set to 'image', but no image was generated)", []
+    elif response_format == RESPONSE_FORMAT_BOTH:
+        # Both required - if either is missing, add a note
+        if not response_text and images_received:
+            return "(Image generated without text description)", images_received
+        elif response_text and not images_received:
+            return response_text + "\n\n(Note: Response format set to 'both', but no image was generated)", []
+        else:
+            return response_text, images_received
+    else:
+        # Unknown format, default to auto
+        return response_text, images_received
 
 
 def get_reply(message, image_data_64_list, session_id):
@@ -1225,6 +1272,10 @@ def get_reply(message, image_data_64_list, session_id):
                 mime_type = 'image/png'  # Default for plugin-generated images
                 send_image_to_telegram(session_id, img_data, mime_type)
     
+    # Apply response format filtering based on user preference
+    response_format = session_data[session_id].get('response_format', RESPONSE_FORMAT_AUTO)
+    response_text, images_received = apply_response_format_filter(response_text, images_received, response_format)
+    
     # Log the assistant response (text first, then images separately)
     log_chat_message(session_id, 'assistant', response_text, None)
     
@@ -1683,7 +1734,8 @@ def long_polling():
                         reply_text += "/start - show this welcome message\n"
                         reply_text += "/help - show help information\n"
                         reply_text += "/clear - clear the conversation context\n"
-                        reply_text += "/status - view current chatbot status\n\n"
+                        reply_text += "/status - view current chatbot status\n"
+                        reply_text += "/format - set response format (auto/text/image/both)\n\n"
                         reply_text += "Simply type your message or send an image to start chatting!"
                     else:
                         reply_text = "👋 Welcome to AI Telegram ChatBot!\n\n"
@@ -1692,7 +1744,8 @@ def long_polling():
                         reply_text += "/start - show this welcome message\n"
                         reply_text += "/help - show detailed help\n"
                         reply_text += "/status - view current status\n"
-                        reply_text += "/clear - clear conversation context\n\n"
+                        reply_text += "/clear - clear conversation context\n"
+                        reply_text += "/format - set response format\n\n"
                         reply_text += "Type /help for a full list of commands and features.\n"
                         reply_text += "Simply type your message or send an image to start chatting!"
                     send_message(chat_id, reply_text)
@@ -1708,6 +1761,7 @@ def long_polling():
                         reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the conversation context\n"
                         reply_text += "/status - view current chatbot status\n"
+                        reply_text += "/format <option> - set response format (auto/text/image/both)\n"
                         
                         # Add plugin commands if available
                         if plugin_manager:
@@ -1725,6 +1779,7 @@ def long_polling():
                         reply_text += "/help - show this help message\n"
                         reply_text += "/clear - clear the context\n"
                         reply_text += "/maxrounds <n> - set the max rounds of conversation\n"
+                        reply_text += "/format <option> - set response format (auto/text/image/both)\n"
                         reply_text += "/gpt3 - set the model to gpt3\n"
                         reply_text += "/gpt4 - set the model to gpt-4-turbo\n"
                         reply_text += "/gpt4o - set the model to gpt-4o\n"
@@ -1772,6 +1827,7 @@ def long_polling():
                     
                     reply_text += f"Max rounds: {session_data[chat_id]['max_rounds']}\n"
                     reply_text += f"Conversation length: {len(session_data[chat_id]['CONVERSATION'])}\n"
+                    reply_text += f"Response format: {session_data[chat_id].get('response_format', RESPONSE_FORMAT_AUTO)}\n"
                     reply_text += f"Chatbot version: {version}\n"
                     
                     # Show kiosk-specific info
@@ -1821,6 +1877,40 @@ def long_polling():
                     reply_text = f"Context cleared"
                     send_message(chat_id, reply_text)
                     continue  # Skip the rest of the processing loop
+    
+                # Handle /format command to set response format preference
+                elif message_text.startswith('/format'):
+                    parts = message_text.split()
+                    
+                    # If no argument provided, show current format and help
+                    if len(parts) == 1:
+                        current_format = session_data[chat_id].get('response_format', RESPONSE_FORMAT_AUTO)
+                        reply_text = f"📋 Current response format: {current_format}\n\n"
+                        reply_text += "Usage: /format <option>\n\n"
+                        reply_text += "Options:\n"
+                        reply_text += "  auto - Model decides (default)\n"
+                        reply_text += "  text - Text only\n"
+                        reply_text += "  image - Image only\n"
+                        reply_text += "  both - Both text and image\n\n"
+                        reply_text += "Example: /format text"
+                        send_message(chat_id, reply_text)
+                        continue
+                    
+                    # Get the requested format
+                    requested_format = parts[1].lower()
+                    
+                    # Validate the format
+                    if requested_format not in VALID_RESPONSE_FORMATS:
+                        reply_text = f"❌ Invalid format: {requested_format}\n\n"
+                        reply_text += "Valid options: auto, text, image, both"
+                        send_message(chat_id, reply_text)
+                        continue
+                    
+                    # Set the format
+                    session_data[chat_id]['response_format'] = requested_format
+                    reply_text = f"✅ Response format set to: {requested_format}"
+                    send_message(chat_id, reply_text)
+                    continue
     
                 # Handle listopenroutermodels command, query live list from https://openrouter.ai/api/v1/models and respond in a text format message
                 elif message_text.startswith('/listopenroutermodels'):
@@ -1905,9 +1995,9 @@ def long_polling():
                             plugin_commands = plugin_manager.get_registered_commands(kiosk_mode=True) if plugin_manager else {}
                             if plugin_commands:
                                 cmd_list = ", ".join([f"/{cmd}" for cmd in plugin_commands.keys()])
-                                send_message(chat_id, f"❌ Unrecognized command. Available: /start, /help, /clear, /status, {cmd_list}. Type /help for more information.")
+                                send_message(chat_id, f"❌ Unrecognized command. Available: /start, /help, /clear, /status, /format, {cmd_list}. Type /help for more information.")
                             else:
-                                send_message(chat_id, "❌ Unrecognized command. In kiosk mode, only /start, /help, /clear, and /status are available. Type /help for more information.")
+                                send_message(chat_id, "❌ Unrecognized command. In kiosk mode, only /start, /help, /clear, /status, and /format are available. Type /help for more information.")
                         else:
                             # In normal mode, suggest help command
                             send_message(chat_id, "❌ Unrecognized command. Type /help to see available commands.")
