@@ -1903,8 +1903,20 @@ def long_polling():
                     
                     # Parse arguments
                     modality = parts[1].lower() if len(parts) > 1 else None
-                    aspect_ratio = parts[2] if len(parts) > 2 else None
-                    image_size = parts[3].upper() if len(parts) > 3 else None
+                    aspect_ratio = None
+                    image_size = None
+                    # Disambiguate second argument: it can be either aspect_ratio or image_size.
+                    if len(parts) > 2:
+                        candidate = parts[2]
+                        candidate_upper = candidate.upper()
+                        # If it looks like a valid image size and not a valid aspect ratio,
+                        # treat it as an image size-only specification (e.g. "/format text SD").
+                        if candidate_upper in VALID_IMAGE_SIZES and candidate not in VALID_ASPECT_RATIOS:
+                            image_size = candidate_upper
+                        else:
+                            aspect_ratio = candidate
+                            if len(parts) > 3:
+                                image_size = parts[3].upper()
                     
                     # Validate modality
                     if modality and modality not in VALID_MODALITIES:
