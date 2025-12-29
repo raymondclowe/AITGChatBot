@@ -1877,8 +1877,8 @@ def long_polling():
                     # If no argument provided, show current settings and help
                     if len(parts) == 1:
                         modalities = session_data[chat_id].get('modalities', 'auto')
-                        aspect_ratio = session_data[chat_id].get('aspect_ratio', 'not set')
-                        image_size = session_data[chat_id].get('image_size', 'not set')
+                        aspect_ratio = session_data[chat_id].get('aspect_ratio') or 'not set'
+                        image_size = session_data[chat_id].get('image_size') or 'not set'
                         
                         reply_text = f"📋 Current settings:\n"
                         reply_text += f"  Modalities: {modalities}\n"
