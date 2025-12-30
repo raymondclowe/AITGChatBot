@@ -549,10 +549,11 @@ When using image-capable models (models that can generate images) in **kiosk mod
    (Please provide both a visual representation AND a text explanation.)
    ```
 
-4. **Response Parsing with Fallbacks**:
+4. **Response Parsing**:
    - Primary: Extract text from `content` field
-   - Fallback 1: Extract text from `reasoning` field (used by some models like Gemini)
-   - Fallback 2: If images exist but no text, provide placeholder: "(Image generated without text description)"
+   - If no text in content but images exist, only images are shown
+   - In kiosk mode with image-capable models, if images exist but no text, provide placeholder: "(Image generated without text description)"
+   - Note: The `reasoning` field (which contains internal model thinking) is intentionally NOT used
 
 5. **Image Request Keywords**: The following keywords trigger user prompt enhancement:
    - `draw`, `sketch`, `diagram`, `illustrate`, `visualize`, `show me`
@@ -561,17 +562,18 @@ When using image-capable models (models that can generate images) in **kiosk mod
 
 **Testing**: Run `python test_image_text_kiosk.py` to validate the implementation.
 
-#### Image Generation and Reasoning Field
+#### Image Generation Response Handling
 
-When using certain models like Google Gemini via OpenRouter for image generation, the API may return explanatory text in different fields:
+When using image-capable models like Google Gemini via OpenRouter for image generation, the API returns responses in the following format:
 
-- **Standard behavior**: Text content is in the `content` field
-- **Image generation (specifically Google Gemini via OpenRouter)**: When an image is generated, the `content` field may be empty and the explanatory/descriptive text is instead placed in a `reasoning` field
+- **Text responses**: Text content is in the `content` field
+- **Image responses**: Images are returned in a separate array, with text description in the `content` field
+- **Internal reasoning**: Some models include a `reasoning` field with internal thinking - this is NOT shown to users
 
-The bot automatically handles this by:
-1. Checking the `content` field first (primary source for text)
-2. If `content` is empty, falling back to the `reasoning` field
-3. In kiosk mode with image-capable models, providing a fallback message if both are empty
-4. This ensures users see both generated images and the AI's explanation/description
+The bot handles responses by:
+1. Extracting text from the `content` field (primary source)
+2. Extracting images from the dedicated images array
+3. In kiosk mode, providing a placeholder if images exist without text description
+4. Never displaying the `reasoning` field (which contains internal model thinking, not user-facing content)
 
-This behavior is logged in debug output when it occurs. See the debug logs (if enabled) for details on response structure.
+This ensures users see the actual response content without being confused by internal model reasoning.

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.1] - 2025-12-29
+### Fixed
+- Removed reasoning field fallback to prevent displaying internal model thinking to users
+  - The `reasoning` field contains the model's internal reasoning process and should not be shown
+  - Previously, when `content` was empty, the bot would display the reasoning text instead
+  - This caused users to see verbose internal thinking instead of the actual response
+  - Now, if there's no content, only images are shown (if present), or a placeholder message in kiosk mode
+
 ## [1.8.0] - 2025-12-21
 ### Added
 - Enhanced kiosk mode to ensure image-capable models always return both image and text
